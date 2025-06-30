@@ -1,2 +1,3 @@
-nodes_modules
 markdown_docs
+node_modules
+crawl_output_csv

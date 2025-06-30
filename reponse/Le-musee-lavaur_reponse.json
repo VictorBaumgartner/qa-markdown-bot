@@ -1,74 +1,307 @@
 [
   {
+    "question": "Le musée est-il ouvert tel jour férié ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Quels sont les tarifs d'entrée ? (Plein tarif",
+    "answer": "Le texte fourni ne mentionne pas explicitement des tarifs pour la médiatheque ou un autre service. Pour trouver l’information demandée, il faudrait s'orienter vers les documents concernant le coût d'accès aux lieux culturels de Lavaur qui ont été inclus dans l'instruction initiale, mais ces informations ne sont pas fournie ici et donc la réponse est \"Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.\"",
+    "reponse_trouvee": "non"
+  },
+  {
     "question": "Y a-t-il des réductions (étudiants",
-    "answer": "Exactement, selon le document 'ville-lavaur.fr_culture_le-musee_ressources-pedagogiques_.md', il est indiqué que pour les étudiants et scolaires qui peuvent justifier leur statut à l'aide d'une fiche ou photo de carnets, des réductions sont offertes."
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question. Les informations données se concentrent principalement sur la bourse et le soutien municipal aux jeunes, l’éducation artistique, ainsi que des événements sportifs spécifiques organisés par la mairie de Toulouse, mais rien n'est mentionné concernant les réductions pour étudiants.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Peut-on acheter des billets ? En ligne ? Sur place ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Est-il nécessaire de réserver à l'avance ?",
-    "answer": "Lorsqu’on cherche la réservation des halles en ville et qu'on vise spécifiquement les halle aux grains ou la halle d'Occitanie, il est nécessaire de réserver à l'avance. Pour ce faire, le formulaire HO-HG doit être rempli puis transmis au service adéquat tel que [halles@ville-lavaur.fr](mailto:halles@ville-lavaur.fr) ou directement déposé à l’accueil de l’Hôtel de Ville ou au Pôle Aménagement et Développement du Territoire (PADT) situé au 300 chemin d'en Roudil. Il est important de noter que cette information provient exclusivement des sources fournies, qui indiquent explicitement la nécessité d’une réservation préalable pour les deux halle en question."
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question. La nécessité ou non de réserver en fonction des informations présentées est inconnue sans détails supplémentaires.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Où se situe le musée ? Quelle est l'adresse exacte ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Comment s'y rendre en transports en commun ?",
-    "answer": "Il est recommandé d'utiliser les transports en commun pour se déplacer dans la ville de Lavaur. Cet acte est non seulement écologique mais aussi très utile, notamment pour ceux qui n'ont pas encore leur permis ou ne sont plus aptes à utiliser une voiture. Pour rendre ce service accessible et inclusif, il y a désormais un bus gratuit de la ville disponible sans inscription ni paiement supplémentaire. Ce moyen de transport est mis en ligne pour suivre le bus en temps réel via les informations fournies sur le site web 'ville-lavaur.fr'. En outre, si vous avez besoin d'aide avec des demandes de logements sociaux ou concernant votre emploi, le CCAS est là pour vous assister dans vos démarches et faciliter ces processus administratifs."
+    "answer": "Accès aux informations sur les lignes régulières mises à disposition par la Ville depuis le 1er septembre 2021, ainsi que pour d’autres périodes comme pendant les petites vacances scolaires. Pour ces dernières, il est possible de bénéficier du bus gratuit sans inscription ni paiement spécial concernant les transports scolaires vers et depuis l'école ou au collège des Clauzades lorsqu'il s'agit d'élèves inscrits dans un établissement desservi par la ligne de transport. Il n’y a donc plus besoin pour ces groupes spécifiques, ni d'inscription ni de paiement supplémentaire concernant les transports scolaires en commun pendant certaines périodes comme les vacances ou petites vacances scolaires lorsque le service est étendu et facilité. Pour plus d’informations sur ces prestations spécifiques, il convient de se référer aux horaires respectifs publiés pour chaque période respective mentionnée précédemment dans la section \"Informations pratiques\" du guide mis à jour en août 2021.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Y a-t-il un parking pour les voitures ? Si oui",
-    "answer": "Non, l'information n'est pas disponible dans les documents fournis."
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il un endroit pour garer les vélos ?",
+    "answer": "Lequel des sites suivants offre une alternative aux voitures motorisées? L'Isatis, le bus propre et gratuit de la ville.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Le musée est-il accessible aux personnes à mobilité réduite ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre directement si le musée est accessible aux personnes à mobilité réduite. La documentation fournie présente des informations sur le soutien de la mairie aux associations et l'accès aux services sociaux, mais rien n’est mentionné concernant un spécifique musée ou ses installations pour les personnes à mobilité réduite.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Quelles sont les expositions permanentes ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Y a-t-il des expositions temporaires en ce moment ? Quel est leur thème ?",
-    "answer": "L'information n'est pas disponible dans les documents fournis car aucun sujet spécifique d’exposition temporaire mentionné ne correspond aux dates de fermeture du musée."
+    "answer": "Je trouve l'information suivante dans le document 'ville-lavaur.fr_culture_le-musee_le-musee-municipal-du-pays-vaurais_.md': \"Ouverture uniquement en période d'expositions temporaires \nDu 1er juin au 30 septembre 2021 du mardi au vendredi : 10h-12h et 14h-18h du\nsamedi au lundi : 14h-18h\" Cependant, les documents fournis ne contiennent pas d'informations sur le thème des expositions temporaires. Par conséquent, je ne trouve pas de document fourni qui répond à la question concernant le thème des expositions temporaires en cours actuellement.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Le contenu du musée est-il adapté aux enfants ?",
-    "answer": "Selon les documents fournis, il semble que le Musée des ressources pédagogiques de la ville ait un espace dédié au développement artistique et culturel des enfants via l'Atelier des enfants Médus'Art. De plus, la Bibliothèque pour enfants présente une collection spécialisée qui peut offrir du contenu adapté aux jeunes publics. En outre, les images accompagnant ces contenus impliquent que le musée dispose d'espaces accessibles et aménagés spécifiquement pour l’enfance comme l’espace jeunesse dans la médiatheque. Tout cela suggère que le contenu du musée est adapté aux enfants, en mettant en lumière une attention particulière portée à leur besoin d'apprentissage culturel et artistique."
+    "answer": "Non, la réponse à cette question n'est pas fournie explicitement dans les documents fournis. Bien que le document lié au Musée des ressources pédagogiques mentionne une collaboration pour sensibiliser des enfants aux richesses du patrimoine local de Lavaur et indique un espace dédié aux jeunes, il ne décrit pas directement le contenu du musée lui-même ni son adéquation avec les enfants. Par conséquent, sans informations spécifiques sur l'exposition d'œuvres dans ce musée pour enfants ou des explications supplémentaires à partir de documents non inclus dans ces sources, la réponse est \"Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.\"",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Combien de temps dure en moyenne une visite ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Peut-on apporter un sac à dos ? Y a-t-il une taille limite ?",
-    "answer": "L'information sur les conditions liées au transport d'un bagage et la taille possible n'est pas disponible dans les documents fournis."
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Peut-on apporter de la nourriture ou des boissons ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Les animaux sont-ils autorisés (hors chiens guides) ?",
-    "answer": "L'information n'est pas disponible dans les documents fournies."
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Le musée propose-t-il des pass annuels ou des cartes de membre ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Le musée est-il public ou privé (ou fondation",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Le bâtiment du musée a-t-il une histoire particulière ou une architecture notable ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question concernant l'histoire particulière ou la signification architecturale du bâtiment du musée. Les informations disponibles se concentrent principalement sur le patrimoine médiéval de Lavaur, y compris des dossiers pédagogiques et visites guidées liés aux monuments comme la cathédrale Saint-Alain et à l'architecture Vauréenne, sans spécifier les détails du musée lui-même.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Quelle est la mission principale ou la vocation spécifique de ce musée ?",
-    "answer": "Le document fournit des informations relatives à \"le musée municipal du Pays de Cocagne\", mais il ne détaille pas explicitement sa mission principale ou son vocation spécifique. Par conséquent, la réponse est: \"L'information sur la mission principale ou la vocation spécifique n'est pas disponible dans les documents fournis.\""
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Comment la collection principale du musée a-t-elle été constituée (ex: donation",
-    "answer": "L'information sur comment la collection principale du musée est devenue ce qu'elle est ne se trouve PAS dans les documents fournis."
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question. Les informations disponibles se concentrent sur l'histoire et le fonctionnement du Centre Hospitalier de Lavaur, sans mention spécifique de la manière dont sa collection principale a été constituée.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Le musée porte-t-il le nom d'une personne spécifique ? Si oui",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question. Les documents mentionnent \"le Musée municipal du pays de Lavaur\", mais il n'est pas spécifié que ce musée porte le nom d'une personne particulière. Pour obtenir une réponse précise, je dois consulter directement les sources fournies ou un autre document pertinent sur la question.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Où se trouve l'entrée principale ?",
-    "answer": "L'information indique que le hall d'entrée principal est situé au niveau inférieur de la ville-lavoir et peut être observé en partant du musée. Cela implique qu'il pourrait y avoir plusieurs entrées à différents niveaux, mais l'entrée principale mentionnée se trouve généralement sur le plus bas ou le premier étage accessible depuis le musée, comme indiqué par la description fournie dans les documents de ville-lavoir."
+    "answer": "L'entrée principale n'est pas explicitement mentionnée dans le contexte fourni, mais il est possible d'en déduire qu'elle pourrait être proche de la source des informations qui se trouve à l'adresse suivante : Tel : 05.63.83.12.20",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Où puis-je acheter mes billets si je ne les ai pas pris en ligne ?",
-    "answer": "Il n'est pas mentionné à l'intérieur des documents fournis où un lieu d'achat physique pour les billets existe. Les achats doivent être effectués via le site 'numerique.fr/plu-lavaur'. Si ce service est inaccessible en ligne, il n'est pas possible de connaître un autre endroit à Lavaur où s’effectuent ces transactions sans avoir d'autres informations supplémentaires."
+    "answer": "Je trouve l'information nécessaire pour répondre à cette question dans le document 'ville-lavaur.fr_marches-publics-de-la-ville-de-lavaur_.md#chunk342'. Selon les offres disponibles, il est possible d'acheter des fournitures alimentaires telles que du pain (Lot 1), des produits laitiers (Lot 2) et des œufs (Lot 3). Cependant, pour l'acquisition de billets à un événement spécifique ou une attraction touristique dans la ville de Lavaur mentionnée dans votre question, il semble qu'il n'y ait pas d'information directe disponible. Il est recommandé de contacter les services touristiques locaux pour obtenir des détails sur l'achat de billets en personne ou au guichet de la ville. \n\nJe ne trouve d'information dans les documents fournis pour répondre à cette question concernant un seul lieu où acheter directement des billets si je n'en prends pas en ligne.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il une file d'attente spécifique pour les billets pré-réservés ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Où puis-je obtenir un plan du musée ?",
-    "answer": "Le Plan du site peut être consulté via le lien suivant : [ville-lavaur.fr_plan-du-site_.md](https://www.ville-lavaur.fr/plan-du-site)."
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il un vestiaire ou des consignes ? Est-ce payant ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Où sont les toilettes ?",
+    "answer": "Les toilettes ne figurent pas explicitement mentionnées dans le document fourni. Pour obtenir cette information, il serait nécessaire de contacter directement le Secrétariat général ou d'autres responsables des équipements municipaux à Lavaur car l'accès aux installations est indiqué comme étant gratuit pour les associations et structures à but non lucratif mais laisse entendre qu'elles sont accessibles sans frais supplémentaires.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Le musée prête-t-il des fauteuils roulants ou des poussettes ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Où puis-je trouver des informations sur les visites guidées ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des audio-guides disponibles ? En quelles langues ? Sont-ils payants ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Y a-t-il un point d'information ?",
-    "answer": "L'information est disponible dans les documents fournis. Plus précisément, \"Avis d'attribution: Achat de denrées alimentaires pour la cuisine centrale de\" Lavaur peut être interprété comme une information concernant un moyen par lequel l'information (ici le soutien logistique) sur les achats des denrées pour la vie municipale est donnée."
+    "answer": "Oui, il y a un \"Point Emploi - Intercommunal Service des employeurs et demandeurs d’emploi\". Il est accessible sur le site de la ville de Lavaur ou par téléphone au 05.63.83.12.89 avec rendez-vous pour les emplois en l'air, ce qui implique une formation initiale à base du vol libre et un soutien éventuel jusqu’à ce que la personne atteigne le niveau de compétences requises pour effectuer ses tâches d’emploi. La structure offre aussi des aides aux embauches via l'enregistrement sur internet, un suivi avec Pôle emplois et une mise en relation possible par visio-guichet avec un conseiller POLE EMPLOI pour les entretien à distance. De plus, la structure dispose de deux ordinateurs avec accès internet pour consultation des offres d'emploi sur le site du Point Emploi Intercommunal et une formation en cours pour certaines personnes intéressées par l’emploi aérien ou souhaitant améliorer leurs compétences.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il une œuvre ou une section particulièrement emblématique ou incontournable dans ce musée ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question. La documentation fournie concerne la maîtrise d’œuvre, le traitement et l'entretien des circulations verticales et horizontales dans plusieurs espaces publics de LAVAUR, y compris une restauration du portail gothique de la Cathédrale Saint-Alain. Elle ne détaille pas les œuvres ou sections emblématiques d'un musée mentionné à aucun moment précisément.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Puis-je prendre des photos ? Avec ou sans flash ? (est ce autorisé ? )",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Puis-je filmer ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des bancs pour s'asseoir dans les salles d'exposition ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis concernant la présence de bancs spécifiques à installer dans ces salles. Il est mentionné que des chaises sont disponibles sur place pour le Chai des Clauzades, mais rien n'est indiqué quant aux autres équipements mobiles comme les bancs qui pourraient être placés par l’association ou un autre utilisateur dans ces espaces.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Est-il permis de toucher certaines œuvres ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Y a-t-il des explications supplémentaires sur cette œuvre (numérique",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question. Les informations disponibles concernent uniquement le maître d’ouvrage, la ville de LAVAUR, et ses travaux liés aux monuments historiques tels que la Cathédrale Saint-Alain ou l'aménagement des berges de l'Agoût, sans mentionner les explications numériques.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Y a-t-il des médiateurs dans les salles pour répondre aux questions ?",
-    "answer": "Non, la présence de médiateurs n'est pas mentionnée explicitement dans le CONTEXTE fourni. Cependant, il est possible que ce service existe mais ne soit pas décrit dans les documents fournis. Par conséquent: \"L'information sur la présence d'un médiateur pour répondre aux questions à l'ESPACE JEUNESSE MUNICIPAL n'est pas disponible dans les documents fournis.\""
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Où se trouve la sortie (de l'exposition / du musée) ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Le Wi-Fi est-il disponible dans le musée ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Puis-je recharger mon téléphone ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des activités spécifiques pour les enfants dans les salles ?",
+    "answer": "La Ville de Lavaur propose plusieurs espaces et installations, dont certains sont conçus ou adaptés aux besoins des jeunes publics. Il existe un \"Bibliothèque enfant\" qui pourrait proposer une gamme d'activités éducatives liées au livre et à la lecture, bien que les détails spécifiques ne soient pas explicitement mentionnés dans le CONTEXTE fourni. De plus, l'\"Espace jeunesse - enfants\" est un espace qui pourrait offrir des activités dirigées vers ce groupe d'âge mais également être utilisé par toutes les associations et structures de la ville sans restrictions spécifiques à une tranche d'âge particulière selon le CONTEXTE. En l’absence de détails précis sur ces activités, il est difficile de fournir des informations concrètes; cependant, en sachant que les installations sont accessibles gratuitement aux associations et structures à but non lucratif pour héberger leurs évènements, on peut supposer qu'il pourrait y avoir une prise en compte des besoins d’enfants.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Si je sors temporairement",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question. La question sur la manière dont on peut rester inscrit malgré une absence temporaire n'est pas abordée directement par le document fourni, et il est donc impossible de fournir des informations précises sans supposer ou inventer des détails non énoncés dans les documents.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Où se trouve le restaurant / café / la cafétéria ? Quels sont ses horaires ?",
-    "answer": "L'information concernant les horaires d'ouverture ou de fermeture n'est pas disponible dans les documents fournis. L'emplacement du restaurant / café / la cafétéria, cependant, semble être mentionné comme étant au sein des établissements scolaires avec une cuisine centrale/restaurant scolaire accessible par le biais de l'échange en tant qu'établissement d’accueil pour les enfants. Il est également possible que ce lieu soit inclus dans certains établissements évoqués, mais sans détails spécifiques sur ses horaires ou son emplacement précis à l’intérieur des lieux scolaires mentionnés uniquement par le biais de ces documents fournis."
+    "answer": "Le restaurant scolaire confectionne des repas de qualité pour toutes les écoles maternelles et primaires, publiques et privées. Pour connaître les horaires spécifiques du restaurant scolaire ou toute autre institution dans la ville, il convient d'accéder aux informations disponibles sur le site 'ville-lavaur.fr_cadre-de-vie_guide-pratique_se-deplacer-31_.md'. Cependant, comme les horaires ne sont pas directement mentionnés dans ce texte fourni spécifiquement pour la question demandée, je dois répondre: \"Je ne trouve d'information dans les documents fournis pour répondre à cette question.\"",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Où se trouve la boutique de souvenirs ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Peut-on acheter des livres sur les collections ou les expositions ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Y a-t-il une aire de pique-nique ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Y a-t-il des fontaines à eau ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des tables à langer dans les toilettes ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il un espace calme ou une salle de repos ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Y a-t-il des visites guidées aujourd'hui ? À quelle heure et sur quel thème ?",
+    "answer": "Je ne trouve pas d'information dans les documents fournis pour répondre à cette question. Les détails concernant la programmation quotidienne des visites guidées, y compris leur heure et thème aujourd'hui, ne sont pas mentionnés dans l'un des textes documentaires disponibles sur le site 'ville-lavaur.fr'.",
+    "reponse_trouvee": "non"
   },
   {
     "question": "Des ateliers pour enfants ou adultes sont-ils proposés ?",
-    "answer": "Les documents fournis mentionnent un atelier adulte « Dire et Faire » mais il n'y a aucune référence à des ateliers spécifiquement pour enfants dans le CONTEXTE fourni. Il est possible que, bien qu'un article existe concernant l'architecture vue par les enfants, cela ne se rapporte pas directement à un atelier de ce type. En conséquence : \"L'information sur des ateliers spécifiquement pour enfants n'est pas disponible dans les documents fournis.\""
+    "answer": "Oui, le Musée du Pays de Cocagne propose des ateliers d'arts plastiques et culturels qui peuvent être adaptés à différents groupes, y compris les enfants. Cependant, il est important de noter que ces activités sont généralement conçues pour adultes et ne spécifiquement destinées aux enfants dans le document fourni. Pour des ateliers exclusivement pour les enfants, on devrait se référer à l'Espace jeunesse mentionné sur la 'la-mediatheque_55'.",
+    "reponse_trouvee": "oui"
   },
   {
     "question": "Y a-t-il des conférences",
-    "answer": "Oui, selon les documents fournis sur 'ville-lavaur.fr_culture_le-musee_le-musee-municipal-du-pays-vaurais_.md', il y a des conférences de santé publique organisées par la ville de Lavaur, telles que les soins palliatifs et le fragilité. Le Dr Jean Leonetti est un ancien ministre et député mentionné dans ce contexte en tant qu'orateur lors d'une telle conférence sur le fragilité parmi les personnes âgées."
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Le musée propose-t-il des nocturnes ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Les audio-guides proposent-ils une audiodescription pour les malvoyants ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des visites en Langue des Signes ?",
+    "answer": "L'information sur les visites en langue des signes n'est pas clairement indiquée dans le CONTEXTE fourni. Par conséquent, je ne trouve d'information pour répondre à cette question que dans les documents fournis pour répondre à cette question : \"Je ne trouve pas d'information dans les documents fournis pour répondre à cette question.\"",
+    "reponse_trouvee": "non"
+  },
+  {
+    "question": "Les supports écrits sont-ils disponibles en gros caractères ou en braille ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des boucles magnétiques pour les malentendants ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
+  },
+  {
+    "question": "Y a-t-il des \"heures calmes\" ou des dispositifs pour les personnes sensibles ?",
+    "answer": "Je ne trouve d'information dans les documents fournis pour répondre à cette question.",
+    "reponse_trouvee": "oui"
   }
 ]
