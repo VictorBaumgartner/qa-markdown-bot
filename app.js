@@ -6,7 +6,7 @@ const csv = require('csv-parser');
 // IMPORTANT: Replace with your actual Gemini API Key.
 // In a real application, you'd load this from environment variables (e.g., process.env.GEMINI_API_KEY)
 // for security. For this example, you can paste it directly, but be careful not to commit it to public repos.
-const API_KEY = "AIzaSyDgO3Z8BFghpvH3GvJhxhK2_RSNYxb6J70";
+const API_KEY = "";
 
 // Function to read all Markdown files from a directory and its subdirectories
 async function readMarkdownFiles(dir) {
