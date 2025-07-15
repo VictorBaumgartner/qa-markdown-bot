@@ -8,7 +8,7 @@ const WORKER_CONFIG = {
     identifier: "qna-worker-01",
     laravel_base_url: "http://192.168.0.43:8000/api",
     network_share_path: "/Users/Shared/CrawledData",
-    qna_json_output_path: "/Users/Shared/Q&AJson", // New path for JSON Q&A storage
+    qna_json_output_path: "/Users/Shared/QAjson", // New path for JSON Q&A storage
     server_ip: "192.168.0.64",
     poll_interval: 5000, // Poll every 5 seconds for new tasks
     max_tokens_per_request: 130000, // 128k tokens for Llama 3.1 8B
