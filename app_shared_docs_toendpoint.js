@@ -79,7 +79,7 @@ const openApiSpec = {
         version: "8.0.0",
         description: "A simplified API without caching for improved reliability."
     },
-    servers: [{ url: `http://192.168.0.64:${PORT}` }],
+    servers: [{ url: `http://localhost:${PORT}` }],
     paths: {
         "/process-single-question": {
             post: {
@@ -113,6 +113,66 @@ const openApiSpec = {
                                         reponse: { type: "string" },
                                         found: { type: "boolean" },
                                         timestamp: { type: "string" }
+                                    }
+                                }
+                            }
+                        }
+                    }, 
+                    "400": { description: "Bad Request" }, 
+                    "404": { description: "Not Found" }, 
+                    "500": { description: "Server Error" }
+                }
+            }
+        },
+        "/process-multiple-questions": {
+            post: {
+                summary: "Process multiple questions without caching",
+                description: "Submits multiple questions (up to 20) and returns precise answers by reading markdown content in real-time.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                properties: {
+                                    folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
+                                    questions: { 
+                                        type: "array", 
+                                        items: { type: "string" },
+                                        maxItems: 20,
+                                        example: ["Quelles sont les expositions actuelles ?", "Quels sont les horaires d'ouverture ?", "Quel est le tarif d'entrée ?"]
+                                    }
+                                },
+                                required: ["folder_name", "questions"]
+                            }
+                        }
+                    }
+                },
+                responses: { 
+                    "200": { 
+                        description: "Success",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        folder: { type: "string" },
+                                        total_questions: { type: "number" },
+                                        processed_questions: { type: "number" },
+                                        results: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    question: { type: "string" },
+                                                    reponse: { type: "string" },
+                                                    found: { type: "boolean" },
+                                                    processing_time_ms: { type: "number" }
+                                                }
+                                            }
+                                        },
+                                        timestamp: { type: "string" },
+                                        total_processing_time_ms: { type: "number" }
                                     }
                                 }
                             }
@@ -394,6 +454,120 @@ app.get('/health', (req, res) => {
     });
 });
 
+app.post('/process-multiple-questions', async (req, res) => {
+    const { folder_name, questions } = req.body;
+    
+    if (!folder_name || !questions || !Array.isArray(questions)) {
+        return res.status(400).json({ 
+            error: "Bad Request: 'folder_name' and 'questions' array are required." 
+        });
+    }
+
+    if (questions.length === 0) {
+        return res.status(400).json({ 
+            error: "Bad Request: 'questions' array cannot be empty." 
+        });
+    }
+
+    if (questions.length > 20) {
+        return res.status(400).json({ 
+            error: "Bad Request: Maximum 20 questions allowed per request." 
+        });
+    }
+
+    const sanitizedQuestions = questions.map(q => sanitizeInput(q)).filter(q => q.length > 0);
+
+    if (sanitizedQuestions.length === 0) {
+        return res.status(400).json({ 
+            error: "Bad Request: No valid questions after sanitization." 
+        });
+    }
+
+    console.log(`\n--- Multiple Questions Request ---`);
+    console.log(`Folder: ${folder_name}`);
+    console.log(`Questions count: ${sanitizedQuestions.length}`);
+
+    const startTime = Date.now();
+    const results = [];
+
+    try {
+        // Read markdown files once for all questions
+        const folderPath = path.join(CONFIG.network_share_path, folder_name);
+        console.log(`Reading markdown content from: ${folderPath}`);
+        const markdownContent = await readMarkdownFiles(folderPath);
+        
+        if (!markdownContent || markdownContent.trim().length === 0) {
+            return res.status(404).json({ 
+                error: "No relevant content found for this folder." 
+            });
+        }
+
+        console.log(`Processing ${sanitizedQuestions.length} questions...`);
+
+        // Process questions with concurrency control
+        const processPromises = sanitizedQuestions.map(async (question, index) => {
+            const questionStartTime = Date.now();
+            
+            try {
+                const result = await concurrencyController.execute(async () => {
+                    return await getAnswerFromOllama(question, markdownContent);
+                });
+
+                const processingTime = Date.now() - questionStartTime;
+                console.log(`Question ${index + 1}/${sanitizedQuestions.length} processed in ${processingTime}ms`);
+
+                return {
+                    question: question,
+                    reponse: result.answer,
+                    found: result.found,
+                    processing_time_ms: processingTime
+                };
+            } catch (error) {
+                console.error(`Error processing question ${index + 1}: ${error.message}`);
+                const processingTime = Date.now() - questionStartTime;
+                
+                return {
+                    question: question,
+                    reponse: `Erreur lors du traitement: ${error.message}`,
+                    found: false,
+                    processing_time_ms: processingTime
+                };
+            }
+        });
+
+        // Wait for all questions to be processed
+        const processedResults = await Promise.all(processPromises);
+        results.push(...processedResults);
+
+        const totalProcessingTime = Date.now() - startTime;
+
+        const response = {
+            folder: folder_name,
+            total_questions: questions.length,
+            processed_questions: results.length,
+            results: results,
+            timestamp: new Date().toISOString(),
+            total_processing_time_ms: totalProcessingTime
+        };
+
+        console.log(`All questions processed in ${totalProcessingTime}ms`);
+        res.status(200).json(response);
+
+    } catch (error) {
+        console.error('Error processing multiple questions:', error);
+        const totalProcessingTime = Date.now() - startTime;
+        
+        res.status(error.statusCode || 500).json({ 
+            error: error.message,
+            folder: folder_name,
+            processed_questions: results.length,
+            results: results,
+            timestamp: new Date().toISOString(),
+            total_processing_time_ms: totalProcessingTime
+        });
+    }
+});
+
 app.post('/process-single-question', async (req, res) => {
     const { folder_name, single_question } = req.body;
     
@@ -487,6 +661,7 @@ if (CONFIG.use_clustering && cluster.isMaster) {
         console.log(`📚 API documentation at http://localhost:${PORT}/api-docs`);
         console.log(`⚡ Concurrency: ${CONFIG.max_concurrent_requests} max requests`);
         console.log(`💾 Cache: DISABLED for reliability`);
+        console.log(`📝 Endpoints: /process-single-question, /process-multiple-questions (max 20)`);
         if (CONFIG.use_clustering) {
             console.log(`🖥️  Worker ${process.pid} started`);
         }
