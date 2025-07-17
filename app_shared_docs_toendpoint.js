@@ -1,500 +1,784 @@
-// Import necessary Node.js modules
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
-const fetch = require('node-fetch'); // You may need to install: npm install node-fetch
+const { parse } = require('csv-parse/sync');
+const express = require('express');
+const fetch = require('node-fetch').default;
+const swaggerUi = require('swagger-ui-express');
+const cliProgress = require('cli-progress');
+const cluster = require('cluster');
+const os = require('os');
 
-// Configuration
-const WORKER_CONFIG = {
-    identifier: "qna-worker-01",
-    laravel_base_url: "http://192.168.0.43:8000/api",
+// --- CONFIGURATION ---
+const CONFIG = {
     network_share_path: "/Users/Shared/CrawledData",
-    qna_json_output_path: "/Users/Shared/QAjson", // New path for JSON Q&A storage
-    server_ip: "192.168.0.64",
-    poll_interval: 5000, // Poll every 5 seconds for new tasks
-    max_tokens_per_request: 130000, // 128k tokens for Llama 3.1 8B
-    backup_json_locally: true, // Enable local JSON backup
-    local_backup_path: "./qna_backup", // Local backup directory
-    ollama_url: "http://localhost:11434", // Ollama server URL
-    model_name: "llama3.1:8b" // Ollama model to use
+    model_context_tokens: 8192,
+    ollama_url: "http://localhost:11434",
+    model_name: "llama3.1:8b",
+    max_response_length: 500,
+    max_concurrent_requests: 10, // Limit concurrent Ollama requests
+    cache_ttl: 3600000, // 1 hour cache TTL
+    chunk_size: 4000, // Max chars per context chunk
+    use_clustering: false // Set to true for multi-core processing
 };
 
-// Function to ensure directory exists
-async function ensureDirectoryExists(dirPath) {
-    try {
-        // Resolve the path first
-        const resolvedPath = path.resolve(dirPath);
+// --- ENHANCED CACHE WITH TTL ---
+class TTLCache {
+    constructor(ttl = CONFIG.cache_ttl) {
+        this.cache = new Map();
+        this.ttl = ttl;
+    }
+
+    set(key, value) {
+        const expiry = Date.now() + this.ttl;
+        this.cache.set(key, { value, expiry });
+    }
+
+    get(key) {
+        const item = this.cache.get(key);
+        if (!item) return null;
         
-        // Create directory recursively
-        await fs.promises.mkdir(resolvedPath, { recursive: true });
-        console.log(`✅ Directory ensured: ${resolvedPath}`);
-        
-        // Verify it's accessible
-        const stats = await fs.promises.stat(resolvedPath);
-        if (!stats.isDirectory()) {
-            throw new Error(`Path exists but is not a directory: ${resolvedPath}`);
+        if (Date.now() > item.expiry) {
+            this.cache.delete(key);
+            return null;
         }
         
-        return resolvedPath;
-    } catch (error) {
-        console.error(`❌ Error creating directory ${dirPath}:`, error);
-        throw error;
+        return item.value;
+    }
+
+    has(key) {
+        return this.get(key) !== null;
+    }
+
+    clear() {
+        this.cache.clear();
+    }
+
+    size() {
+        return this.cache.size;
     }
 }
 
-// Function to estimate token count (rough approximation)
-function estimateTokenCount(text) {
-    // Rough estimation: 1 token ≈ 4 characters for English text
-    return Math.ceil(text.length / 4);
-}
+// --- CACHES ---
+const markdownCache = new TTLCache();
+const responseCache = new TTLCache(1800000); // 30 min for responses
 
-// Function to truncate content if it exceeds token limit
-function truncateContent(content, maxTokens) {
-    const estimatedTokens = estimateTokenCount(content);
-    if (estimatedTokens <= maxTokens) {
-        return content;
+// --- CONCURRENCY CONTROL ---
+class ConcurrencyController {
+    constructor(maxConcurrent = CONFIG.max_concurrent_requests) {
+        this.maxConcurrent = maxConcurrent;
+        this.running = 0;
+        this.queue = [];
     }
-    
-    const maxChars = maxTokens * 4;
-    const truncated = content.substring(0, maxChars);
-    console.warn(`⚠️ Content truncated from ${estimatedTokens} to ~${maxTokens} tokens`);
-    return truncated;
-}
 
-// Function to save Q&A results as JSON
-async function saveQnaAsJson(task, qnaResults) {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const filename = `qna_${task.id}_${task.folder_name}_${timestamp}.json`;
-    
-    const jsonData = {
-        task_id: task.id,
-        folder_name: task.folder_name,
-        processed_at: new Date().toISOString(),
-        worker_identifier: WORKER_CONFIG.identifier,
-        total_questions: qnaResults.length,
-        qna_results: qnaResults,
-        metadata: {
-            api_model: "llama3.1:8b",
-            api_provider: "ollama",
-            max_tokens_limit: WORKER_CONFIG.max_tokens_per_request,
-            ollama_url: WORKER_CONFIG.ollama_url,
-            network_share_path: WORKER_CONFIG.network_share_path,
-            json_output_path: WORKER_CONFIG.qna_json_output_path
-        }
-    };
-    
-    const jsonString = JSON.stringify(jsonData, null, 2);
-    
-    // Save to network share
-    try {
-        const networkPath = await ensureDirectoryExists(WORKER_CONFIG.qna_json_output_path);
-        const fullNetworkPath = path.join(networkPath, filename);
-        await fs.promises.writeFile(fullNetworkPath, jsonString, 'utf8');
-        console.log(`✅ JSON saved to network share: ${fullNetworkPath}`);
-    } catch (error) {
-        console.error('❌ Error saving JSON to network share:', error);
-    }
-    
-    // Save local backup if enabled
-    if (WORKER_CONFIG.backup_json_locally) {
-        try {
-            const localPath = await ensureDirectoryExists(WORKER_CONFIG.local_backup_path);
-            const fullLocalPath = path.join(localPath, filename);
-            await fs.promises.writeFile(fullLocalPath, jsonString, 'utf8');
-            console.log(`✅ JSON backup saved locally: ${fullLocalPath}`);
-        } catch (error) {
-            console.error('❌ Error saving JSON backup locally:', error);
-        }
-    }
-    
-    return filename;
-}
-
-// Function to read all Markdown files from a directory and its subdirectories
-async function readMarkdownFiles(dir) {
-    let markdownContent = '';
-    let fileCount = 0;
-    
-    // Resolve the directory path
-    const resolvedDir = path.resolve(dir);
-    
-    if (!fs.existsSync(resolvedDir)) {
-        console.warn(`Directory does not exist: ${resolvedDir}`);
-        return { content: '', fileCount: 0 };
-    }
-    
-    try {
-        const files = await fs.promises.readdir(resolvedDir, { withFileTypes: true });
-        
-        for (const file of files) {
-            const fullPath = path.join(resolvedDir, file.name);
-            
-            if (file.isDirectory()) {
-                // Skip hidden directories and system folders
-                if (file.name.startsWith('.') || file.name === 'node_modules') {
-                    continue;
-                }
-                
-                // Recursively read from subdirectories
-                const subResult = await readMarkdownFiles(fullPath);
-                markdownContent += subResult.content;
-                fileCount += subResult.fileCount;
-            } else if (file.isFile() && file.name.endsWith('.md')) {
-                // Read the content of Markdown files
-                console.log(`📄 Reading Markdown file: ${fullPath}`);
-                try {
-                    const content = await fs.promises.readFile(fullPath, 'utf8');
-                    markdownContent += `\n--- FILE: ${file.name} (${fullPath}) ---\n${content}\n`;
-                    fileCount++;
-                } catch (error) {
-                    console.error(`❌ Error reading file ${fullPath}:`, error);
-                }
-            }
-        }
-    } catch (error) {
-        console.error(`❌ Error reading directory ${resolvedDir}:`, error);
-    }
-    
-    return { content: markdownContent, fileCount };
-}
-
-// Function to fetch a task from the Laravel worker endpoint
-async function fetchTask() {
-    try {
-        const response = await fetch(`${WORKER_CONFIG.laravel_base_url}/v1/worker/get-questions-task`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Worker-Identifier': WORKER_CONFIG.identifier
-            }
+    async execute(asyncFn) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ fn: asyncFn, resolve, reject });
+            this.processQueue();
         });
-        
-        if (!response.ok) {
-            if (response.status === 404) {
-                console.log('No tasks available');
-                return null;
-            }
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const task = await response.json();
-        console.log('Received task:', JSON.stringify(task, null, 2));
-        return task;
-    } catch (error) {
-        console.error('Error fetching task:', error);
-        return null;
     }
-}
 
-// Enhanced function to call Ollama Llama 3.1 8B with token management
-async function getAnswerFromOllama(question, context) {
-    // Truncate context if it exceeds token limit (128k for Llama 3.1)
-    const truncatedContext = truncateContent(context, WORKER_CONFIG.max_tokens_per_request - 1000); // Reserve 1000 tokens for question and response
-    
-    const apiUrl = `http://localhost:11434/api/generate`;
-    const prompt = `En vous basant sur le contenu du document suivant, répondez à la question avec précision et concision. Si l'information n'est pas explicitement fournie, indiquez que vous ne trouvez pas la réponse dans le contexte fourni.\n\nContenu du document :\n${truncatedContext}\n\nQuestion : ${question}\n\nRéponse :`;
-    
-    const payload = {
-        model: "llama3.1:8b",
-        prompt: prompt,
-        stream: false,
-        options: {
-            temperature: 0.1,
-            top_p: 0.9,
-            num_ctx: 131072, // 128k context window
-            num_predict: 2048 // Max response length
-        }
-    };
-    
-    try {
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        
-        if (!response.ok) {
-            const errorBody = await response.text();
-            
-            // Check for common Ollama errors
-            if (response.status === 404) {
-                throw new Error('Model llama3.1:8b not found. Please run: ollama pull llama3.1:8b');
-            }
-            
-            throw new Error(`Ollama API error: ${response.status} - ${errorBody}`);
-        }
-        
-        const result = await response.json();
-        
-        if (result.response) {
-            return result.response.trim();
-        } else {
-            console.warn("Unexpected Ollama API response structure:", JSON.stringify(result, null, 2));
-            return "Could not generate an answer. Unexpected API response.";
-        }
-    } catch (error) {
-        console.error("Error calling Ollama API:", error);
-        
-        // Check if Ollama is running
-        if (error.code === 'ECONNREFUSED') {
-            return "Ollama server is not running. Please start it with: ollama serve";
-        }
-        
-        return `Failed to get an answer from the AI: ${error.message}`;
-    }
-}
-
-// Function to send results back to Laravel
-async function sendResults(task, qnaResults) {
-    const updatePayload = {
-        worker_identifier: WORKER_CONFIG.identifier,
-        site_id_laravel: task.id,
-        task_type: "ask_questions",
-        qna_results: qnaResults,
-        message: `Q&A terminé. ${qnaResults.length} réponses trouvées.`
-    };
-    
-    try {
-        const response = await fetch(`${WORKER_CONFIG.laravel_base_url}/v1/worker/task-update`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Worker-Identifier': WORKER_CONFIG.identifier
-            },
-            body: JSON.stringify(updatePayload)
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const result = await response.json();
-        console.log('Successfully sent results to Laravel:', result);
-        return true;
-    } catch (error) {
-        console.error('Error sending results to Laravel:', error);
-        return false;
-    }
-}
-
-// Function to process a single task
-async function processTask(task) {
-    console.log(`\n--- Processing Task ID: ${task.id} ---`);
-    console.log(`Folder: ${task.folder_name}`);
-    console.log(`Questions to ask: ${task.questions_to_ask.length}`);
-    
-    // Construct the path to the markdown files
-    const markdownDirPath = path.join(WORKER_CONFIG.network_share_path, task.folder_name);
-    console.log(`Looking for markdown files in: ${markdownDirPath}`);
-    
-    try {
-        // Read all Markdown content from the specified folder and subdirectories
-        const { content: allMarkdownContent, fileCount } = await readMarkdownFiles(markdownDirPath);
-        
-        if (!allMarkdownContent.trim()) {
-            console.warn(`No Markdown content found in: ${markdownDirPath}`);
-            // Send empty results or error message
-            const qnaResults = task.questions_to_ask.map(q => ({
-                question: q.question,
-                reponse: "Aucun contenu markdown trouvé pour répondre à cette question."
-            }));
-            
-            await sendResults(task, qnaResults);
-            await saveQnaAsJson(task, qnaResults);
+    async processQueue() {
+        if (this.running >= this.maxConcurrent || this.queue.length === 0) {
             return;
         }
-        
-        console.log(`Found markdown content from ${fileCount} files (${allMarkdownContent.length} characters)`);
-        console.log(`Estimated tokens: ${estimateTokenCount(allMarkdownContent)}`);
-        
-        // Process each question
-        const qnaResults = [];
-        for (const questionObj of task.questions_to_ask) {
-            console.log(`\nProcessing question: ${questionObj.question}`);
-            
-            const answer = await getAnswerFromOllama(questionObj.question, allMarkdownContent);
-            qnaResults.push({
-                question: questionObj.question,
-                reponse: answer
-            });
-            
-            console.log(`Answer: ${answer}`);
-            
-            // Add a delay to avoid overloading the local model
-            await new Promise(resolve => setTimeout(resolve, 500));
+
+        this.running++;
+        const { fn, resolve, reject } = this.queue.shift();
+
+        try {
+            const result = await fn();
+            resolve(result);
+        } catch (error) {
+            reject(error);
+        } finally {
+            this.running--;
+            this.processQueue();
         }
-        
-        // Save Q&A results as JSON
-        const jsonFilename = await saveQnaAsJson(task, qnaResults);
-        console.log(`📄 Q&A results saved as: ${jsonFilename}`);
-        
-        // Send results back to Laravel
-        const success = await sendResults(task, qnaResults);
-        
-        if (success) {
-            console.log(`✅ Task ${task.id} completed successfully`);
-        } else {
-            console.log(`❌ Task ${task.id} failed to send results`);
-        }
-    } catch (error) {
-        console.error('Error processing task:', error);
-        
-        // Send error results
-        const qnaResults = task.questions_to_ask.map(q => ({
-            question: q.question,
-            reponse: `Erreur lors du traitement: ${error.message}`
-        }));
-        
-        await sendResults(task, qnaResults);
-        await saveQnaAsJson(task, qnaResults);
     }
 }
 
-// Function to check Ollama server and model availability
-async function checkOllamaStatus() {
-    try {
-        // Check if Ollama server is running
-        const serverResponse = await fetch(`${WORKER_CONFIG.ollama_url}/api/version`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (!serverResponse.ok) {
-            console.error('❌ Ollama server is not running. Please start it with: ollama serve');
-            return false;
-        }
-        
-        console.log('✅ Ollama server is running');
-        
-        // Check if the model is available
-        const modelsResponse = await fetch(`${WORKER_CONFIG.ollama_url}/api/tags`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
-        });
-        
-        if (modelsResponse.ok) {
-            const models = await modelsResponse.json();
-            const modelExists = models.models.some(model => model.name === WORKER_CONFIG.model_name);
-            
-            if (!modelExists) {
-                console.error(`❌ Model ${WORKER_CONFIG.model_name} not found. Please run: ollama pull ${WORKER_CONFIG.model_name}`);
-                return false;
+const concurrencyController = new ConcurrencyController();
+
+// --- EXPRESS APP SETUP ---
+const app = express();
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Add compression middleware
+const compression = require('compression');
+app.use(compression());
+
+// Add request timeout
+const timeout = require('connect-timeout');
+app.use(timeout('300s')); // 5 minute timeout
+
+const PORT = process.env.PORT || 3000;
+
+// --- ENHANCED API DOCUMENTATION ---
+const openApiSpec = {
+    openapi: "3.0.3",
+    info: {
+        title: "High-Performance Q&A API",
+        version: "7.0.0",
+        description: "An optimized API with intelligent caching, concurrency control, and enhanced performance."
+    },
+    servers: [{ url: `http://localhost:${PORT}` }],
+    paths: {
+        "/process-single-question": {
+            post: {
+                summary: "Process a single question with caching",
+                description: "Submits one question and returns a precise answer using cached markdown content with response caching.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                properties: {
+                                    folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
+                                    single_question: { type: "string", example: "Quelles sont les expositions actuelles ?" },
+                                    use_cache: { type: "boolean", default: true, description: "Whether to use response caching" }
+                                },
+                                required: ["folder_name", "single_question"]
+                            }
+                        }
+                    }
+                },
+                responses: { 
+                    "200": { 
+                        description: "Success",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        folder: { type: "string" },
+                                        question: { type: "string" },
+                                        reponse: { type: "string" },
+                                        found: { type: "boolean", description: "True if relevant answer found in documentation" },
+                                        cached: { type: "boolean" },
+                                        timestamp: { type: "string" }
+                                    }
+                                }
+                            }
+                        }
+                    }, 
+                    "400": { description: "Bad Request" }, 
+                    "404": { description: "Not Found" }, 
+                    "500": { description: "Server Error" },
+                    "503": { description: "Service Unavailable" }
+                }
             }
+        },
+        "/process-csv": {
+            post: {
+                summary: "Process a CSV file with batch optimization",
+                description: "Processes CSV questions in optimized batches with progress tracking.",
+                requestBody: {
+                    required: true,
+                    content: {
+                        "application/json": {
+                            schema: {
+                                type: "object",
+                                properties: {
+                                    folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
+                                    csv_path: { type: "string", example: "/Users/victor/Desktop/questions.csv" },
+                                    batch_size: { type: "number", default: 5, description: "Number of questions to process simultaneously" }
+                                },
+                                required: ["folder_name", "csv_path"]
+                            }
+                        }
+                    }
+                },
+                responses: { 
+                    "200": { 
+                        description: "Success",
+                        content: {
+                            "application/json": {
+                                schema: {
+                                    type: "object",
+                                    properties: {
+                                        folder: { type: "string" },
+                                        csv_path: { type: "string" },
+                                        results: {
+                                            type: "array",
+                                            items: {
+                                                type: "object",
+                                                properties: {
+                                                    question: { type: "string" },
+                                                    reponse: { type: "string" },
+                                                    found: { type: "boolean", description: "True if relevant answer found in documentation" },
+                                                    cached: { type: "boolean" }
+                                                }
+                                            }
+                                        },
+                                        statistics: {
+                                            type: "object",
+                                            properties: {
+                                                total_questions: { type: "number" },
+                                                processed_questions: { type: "number" },
+                                                cache_hits: { type: "number" },
+                                                found_answers: { type: "number" },
+                                                processing_time_seconds: { type: "number" },
+                                                timestamp: { type: "string" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }, 
+                    "400": { description: "Bad Request" }, 
+                    "404": { description: "Not Found" }, 
+                    "500": { description: "Server Error" }
+                }
+            }
+        },
+        "/health": {
+            get: {
+                summary: "Health check endpoint",
+                description: "Returns server health status and cache statistics.",
+                responses: {
+                    "200": { description: "Server is healthy" }
+                }
+            }
+        },
+        "/cache/clear": {
+            post: {
+                summary: "Clear all caches",
+                description: "Clears both markdown and response caches.",
+                responses: {
+                    "200": { description: "Caches cleared successfully" }
+                }
+            }
+        }
+    }
+};
+
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
+app.get('/', (req, res) => res.redirect('/api-docs'));
+
+// --- UTILITY FUNCTIONS ---
+function chunkText(text, maxChars = CONFIG.chunk_size) {
+    if (text.length <= maxChars) return [text];
+    
+    const chunks = [];
+    let start = 0;
+    
+    while (start < text.length) {
+        let end = start + maxChars;
+        
+        if (end < text.length) {
+            // Try to break at a sentence or paragraph boundary
+            const lastPeriod = text.lastIndexOf('.', end);
+            const lastNewline = text.lastIndexOf('\n', end);
+            const breakPoint = Math.max(lastPeriod, lastNewline);
             
-            console.log(`✅ Model ${WORKER_CONFIG.model_name} is available`);
+            if (breakPoint > start + maxChars * 0.5) {
+                end = breakPoint + 1;
+            }
         }
         
-        // Test the model with a simple request
-        const testPayload = {
-            model: WORKER_CONFIG.model_name,
-            prompt: "Hello, this is a test.",
+        chunks.push(text.substring(start, end));
+        start = end;
+    }
+    
+    return chunks;
+}
+
+function sanitizeInput(input) {
+    return input.trim().replace(/[^\w\s\-_.àâäéèêëïîôöùûüÿç]/gi, '');
+}
+
+function createCacheKey(folder, question) {
+    return `${folder}:${Buffer.from(question).toString('base64')}`;
+}
+
+// --- CORE LOGIC FUNCTIONS ---
+async function readMarkdownFiles(dir) {
+    const resolvedDir = path.resolve(dir);
+    
+    try {
+        await fs.access(resolvedDir);
+    } catch (error) {
+        const err = new Error(`Directory not found: ${resolvedDir}`);
+        err.statusCode = 404;
+        throw err;
+    }
+
+    let content = '';
+    const files = await fs.readdir(resolvedDir, { withFileTypes: true });
+    
+    // Process files in parallel for better performance
+    const filePromises = files.map(async (file) => {
+        const fullPath = path.join(resolvedDir, file.name);
+        
+        if (file.isDirectory()) {
+            return await readMarkdownFiles(fullPath);
+        } else if (file.name.endsWith('.md')) {
+            try {
+                const fileContent = await fs.readFile(fullPath, 'utf8');
+                // Enhanced relevance filtering
+                const relevantKeywords = ['exposition', 'exhibition', 'musée', 'museum', 'art', 'collection', 'visite', 'horaire', 'tarif'];
+                const hasRelevantContent = relevantKeywords.some(keyword => 
+                    fileContent.toLowerCase().includes(keyword)
+                );
+                
+                if (hasRelevantContent) {
+                    return `\n\n--- Contenu du fichier: ${file.name} ---\n\n${fileContent}`;
+                }
+            } catch (error) {
+                console.warn(`Warning: Could not read file ${fullPath}: ${error.message}`);
+            }
+        }
+        return '';
+    });
+
+    const results = await Promise.all(filePromises);
+    content = results.join('');
+    
+    return content;
+}
+
+async function loadMarkdownCache() {
+    console.log("Pre-loading markdown content into cache...");
+    
+    try {
+        const folders = await fs.readdir(CONFIG.network_share_path, { withFileTypes: true });
+        const cachePromises = folders
+            .filter(folder => folder.isDirectory())
+            .map(async (folder) => {
+                const folderPath = path.join(CONFIG.network_share_path, folder.name);
+                try {
+                    const content = await readMarkdownFiles(folderPath);
+                    if (content.trim()) {
+                        markdownCache.set(folder.name, content);
+                        console.log(`✓ Cached markdown content for folder: ${folder.name} (${Math.round(content.length/1024)}KB)`);
+                    }
+                } catch (error) {
+                    console.error(`✗ Failed to cache folder ${folder.name}: ${error.message}`);
+                }
+            });
+
+        await Promise.all(cachePromises);
+        console.log(`Markdown cache loading completed. ${markdownCache.size()} folders cached.`);
+    } catch (error) {
+        console.error(`Error loading markdown cache: ${error.message}`);
+    }
+}
+
+async function getCachedMarkdown(folder_name) {
+    if (!markdownCache.has(folder_name)) {
+        console.log(`Loading markdown content for folder: ${folder_name}`);
+        const folderPath = path.join(CONFIG.network_share_path, folder_name);
+        const content = await readMarkdownFiles(folderPath);
+        markdownCache.set(folder_name, content);
+        console.log(`✓ Cached markdown content for folder: ${folder_name}`);
+    }
+    return markdownCache.get(folder_name);
+}
+
+async function parseCsvQuestions(csvPath) {
+    try {
+        await fs.access(csvPath);
+    } catch (error) {
+        const err = new Error(`CSV file not found: ${csvPath}`);
+        err.statusCode = 404;
+        throw err;
+    }
+
+    const csvContent = await fs.readFile(csvPath, 'utf8');
+    
+    try {
+        const questions = parse(csvContent, { 
+            columns: true, 
+            skip_empty_lines: true, 
+            trim: true,
+            relax_column_count: true 
+        });
+        
+        // Validate and filter questions
+        return questions.filter(q => q.question && q.question.trim().length > 0);
+    } catch (error) {
+        const userError = new Error("Failed to parse CSV. Ensure 'question' header exists and CSV is properly formatted.");
+        userError.statusCode = 400;
+        throw userError;
+    }
+}
+
+async function getAnswerFromOllama(question, context) {
+    const today = new Date().toLocaleDateString('fr-FR', { 
+        day: 'numeric', 
+        month: 'long', 
+        year: 'numeric' 
+    });
+
+    // Optimize context by chunking if too large
+    const chunks = chunkText(context);
+    let bestAnswer = null;
+    let bestScore = 0;
+    let foundRelevantInfo = false;
+
+    for (const chunk of chunks.slice(0, 3)) { // Process max 3 chunks for speed
+        const prompt = `Tu es un assistant expert pour un musée. Ta seule source de connaissance est le CONTEXTE ci-dessous. Réponds à la QUESTION de manière claire, concise et précise, en moins de ${CONFIG.max_response_length} caractères. Utilise uniquement les informations du CONTEXTE. N'invente RIEN. La date d'aujourd'hui est le ${today}. Si la réponse ne se trouve pas dans le CONTEXTE, réponds exactement: "Je ne trouve pas d'information pertinente dans les documents fournis pour répondre à cette question."\n\nCONTEXTE:\n${chunk}\n\nQUESTION:\n${question}\n\nRÉPONSE COURTOISE ET PRÉCISE:`;
+
+        const payload = {
+            model: CONFIG.model_name,
+            prompt,
             stream: false,
-            options: {
-                num_ctx: 131072,
-                num_predict: 50
+            options: { 
+                num_ctx: CONFIG.model_context_tokens,
+                temperature: 0.1,
+                top_p: 0.9,
+                repeat_penalty: 1.1
             }
         };
-        
-        const testResponse = await fetch(`${WORKER_CONFIG.ollama_url}/api/generate`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(testPayload)
-        });
-        
-        if (testResponse.ok) {
-            console.log('✅ Model test successful');
-            return true;
-        } else {
-            console.error(`❌ Model test failed: ${testResponse.status}`);
-            return false;
-        }
-    } catch (error) {
-        console.error('❌ Error testing Ollama:', error);
-        console.log('Make sure Ollama is installed and running:');
-        console.log('1. Install: curl -fsSL https://ollama.com/install.sh | sh');
-        console.log('2. Start server: ollama serve');
-        console.log(`3. Pull model: ollama pull ${WORKER_CONFIG.model_name}`);
-        return false;
-    }
-}
 
-// Main worker loop
-async function workerLoop() {
-    console.log(`🚀 Starting Q&A Worker: ${WORKER_CONFIG.identifier}`);
-    console.log(`📍 Network share path: ${resolvedNetworkPath}`);
-    console.log(`📁 Q&A JSON output path: ${resolvedJsonPath}`);
-    console.log(`🌐 Laravel server: ${WORKER_CONFIG.laravel_base_url}`);
-    console.log(`⏰ Poll interval: ${WORKER_CONFIG.poll_interval}ms`);
-    console.log(`🤖 Using Ollama model: ${WORKER_CONFIG.model_name}`);
-    console.log(`🔗 Ollama server: ${WORKER_CONFIG.ollama_url}`);
-    console.log(`🔢 Max tokens per request: ${WORKER_CONFIG.max_tokens_per_request}`);
-    
-    // Check Ollama status
-    const ollamaReady = await checkOllamaStatus();
-    if (!ollamaReady) {
-        console.error('❌ Ollama not ready. Exiting...');
-        return;
-    }
-    
-    // Check if network share paths are accessible
-    const resolvedNetworkPath = path.resolve(WORKER_CONFIG.network_share_path);
-    const resolvedJsonPath = path.resolve(WORKER_CONFIG.qna_json_output_path);
-    
-    if (!fs.existsSync(resolvedNetworkPath)) {
-        console.error(`❌ Network share not accessible: ${resolvedNetworkPath}`);
-        console.log('Please ensure the network share exists and is accessible.');
-        console.log('You may need to create it first:');
-        console.log(`mkdir -p "${resolvedNetworkPath}"`);
-        return;
-    }
-    
-    console.log(`✅ Network share accessible: ${resolvedNetworkPath}`);
-    
-    // Ensure JSON output directory exists
-    try {
-        await ensureDirectoryExists(resolvedJsonPath);
-        if (WORKER_CONFIG.backup_json_locally) {
-            await ensureDirectoryExists(WORKER_CONFIG.local_backup_path);
-        }
-    } catch (error) {
-        console.error('❌ Error setting up directories:', error);
-        return;
-    }
-    
-    while (true) {
         try {
-            console.log('\n🔍 Checking for new tasks...');
-            const task = await fetchTask();
-            
-            if (task && task.task_type === 'ask_questions') {
-                await processTask(task);
-            } else if (task) {
-                console.log(`⚠️ Received task with unsupported type: ${task.task_type}`);
+            const response = await fetch(`${CONFIG.ollama_url}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                timeout: 30000 // 30 second timeout
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                throw new Error(`Ollama API Error: ${response.status} - ${errorBody}`);
             }
+
+            const result = await response.json();
+            let answer = result.response ? result.response.trim() : "La réponse du modèle était vide.";
+
+            // Check if answer contains relevant information
+            const isRelevantAnswer = !answer.includes("Je ne trouve pas d'information pertinente") && 
+                                   !answer.includes("La réponse du modèle était vide") &&
+                                   answer.length > 10; // Minimum meaningful response length
+
+            // Score answer based on relevance
+            const score = calculateRelevanceScore(answer, question);
             
-            // Wait before checking for next task
-            await new Promise(resolve => setTimeout(resolve, WORKER_CONFIG.poll_interval));
+            if (score > bestScore && isRelevantAnswer) {
+                bestAnswer = answer;
+                bestScore = score;
+                foundRelevantInfo = true;
+            }
         } catch (error) {
-            console.error('Error in worker loop:', error);
-            // Wait a bit longer before retrying after an error
-            await new Promise(resolve => setTimeout(resolve, WORKER_CONFIG.poll_interval * 2));
+            if (error.message.includes("allocate") || error.message.includes("context window")) {
+                throw new Error(`Ollama Memory Error: Reduce context size or restart Ollama.`);
+            }
+            console.warn(`Chunk processing failed: ${error.message}`);
+            continue;
         }
     }
+
+    const finalAnswer = bestAnswer || "Je ne trouve pas d'information pertinente dans les documents fournis pour répondre à cette question.";
+    
+    return {
+        answer: finalAnswer,
+        found: foundRelevantInfo
+    };
 }
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-    console.log('\n🛑 Shutting down Q&A Worker...');
-    process.exit(0);
+function calculateRelevanceScore(answer, question) {
+    const answerLower = answer.toLowerCase();
+    const questionLower = question.toLowerCase();
+    
+    // Basic keyword matching
+    const questionWords = questionLower.split(/\s+/).filter(w => w.length > 3);
+    const matchCount = questionWords.filter(word => answerLower.includes(word)).length;
+    
+    // Length penalty for too short answers
+    const lengthScore = Math.min(answer.length / 50, 1);
+    
+    return (matchCount / questionWords.length) * lengthScore;
+}
+
+// --- ENHANCED ENDPOINTS ---
+app.get('/health', (req, res) => {
+    res.json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        cache: {
+            markdown: markdownCache.size(),
+            responses: responseCache.size()
+        },
+        config: {
+            max_concurrent: CONFIG.max_concurrent_requests,
+            model: CONFIG.model_name
+        }
+    });
 });
 
+app.post('/cache/clear', (req, res) => {
+    markdownCache.clear();
+    responseCache.clear();
+    res.json({ message: 'All caches cleared successfully' });
+});
+
+app.post('/process-single-question', async (req, res) => {
+    const { folder_name, single_question, use_cache = true } = req.body;
+    
+    if (!folder_name || !single_question) {
+        return res.status(400).json({ 
+            error: "Bad Request: 'folder_name' and 'single_question' are required." 
+        });
+    }
+
+    const sanitizedQuestion = sanitizeInput(single_question);
+    const cacheKey = createCacheKey(folder_name, sanitizedQuestion);
+
+    console.log(`\n--- Single Question Request ---`);
+    console.log(`Folder: ${folder_name}`);
+    console.log(`Question: ${sanitizedQuestion}`);
+
+    try {
+        // Check response cache first
+        if (use_cache && responseCache.has(cacheKey)) {
+            console.log('✓ Cache hit for response');
+            const cachedResponse = responseCache.get(cacheKey);
+            return res.status(200).json({
+                ...cachedResponse,
+                cached: true,
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        const markdownContent = await getCachedMarkdown(folder_name);
+        
+        if (!markdownContent || markdownContent.trim().length === 0) {
+            return res.status(404).json({ 
+                error: "No relevant content found for this folder." 
+            });
+        }
+
+        const result = await concurrencyController.execute(async () => {
+            return await getAnswerFromOllama(sanitizedQuestion, markdownContent);
+        });
+
+        const response = {
+            folder: folder_name,
+            question: sanitizedQuestion,
+            reponse: result.answer,
+            found: result.found,
+            cached: false,
+            timestamp: new Date().toISOString()
+        };
+
+        // Cache the response
+        if (use_cache) {
+            responseCache.set(cacheKey, response);
+        }
+
+        res.status(200).json(response);
+
+    } catch (error) {
+        console.error('Error processing single question:', error);
+        res.status(error.statusCode || 500).json({ 
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
+});
+
+app.post('/process-csv', async (req, res) => {
+    const { folder_name, csv_path, batch_size = 5 } = req.body;
+    
+    if (!folder_name || !csv_path) {
+        return res.status(400).json({ 
+            error: "Bad Request: 'folder_name' and 'csv_path' are required." 
+        });
+    }
+
+    console.log(`\n--- CSV Processing Request ---`);
+    console.log(`Folder: ${folder_name}`);
+    console.log(`CSV Path: ${csv_path}`);
+    console.log(`Batch Size: ${batch_size}`);
+
+    try {
+        const markdownContent = await getCachedMarkdown(folder_name);
+        
+        if (!markdownContent || markdownContent.trim().length === 0) {
+            return res.status(404).json({ 
+                error: "No relevant content found for this folder." 
+            });
+        }
+
+        const questionsToProcess = await parseCsvQuestions(csv_path);
+        console.log(`Found ${questionsToProcess.length} questions to process`);
+
+        if (questionsToProcess.length === 0) {
+            return res.status(400).json({ 
+                error: "No valid questions found in CSV file." 
+            });
+        }
+
+        const progressBar = new cliProgress.SingleBar({
+            format: 'Processing |{bar}| {percentage}% | {value}/{total} | ETA: {eta}s',
+            hideCursor: true
+        }, cliProgress.Presets.shades_classic);
+
+        progressBar.start(questionsToProcess.length, 0);
+        
+        const results = [];
+        const startTime = Date.now();
+
+        for (let i = 0; i < questionsToProcess.length; i += batch_size) {
+            const batch = questionsToProcess.slice(i, i + batch_size);
+            
+            const batchPromises = batch.map(async (q) => {
+                if (!q.question || q.question.trim().length === 0) {
+                    return null;
+                }
+
+                const sanitizedQuestion = sanitizeInput(q.question);
+                const cacheKey = createCacheKey(folder_name, sanitizedQuestion);
+
+                try {
+                    if (responseCache.has(cacheKey)) {
+                        const cachedResponse = responseCache.get(cacheKey);
+                        return {
+                            question: sanitizedQuestion,
+                            reponse: cachedResponse.reponse,
+                            found: cachedResponse.found || false,
+                            cached: true
+                        };
+                    }
+
+                    const result = await concurrencyController.execute(async () => {
+                        return await getAnswerFromOllama(sanitizedQuestion, markdownContent);
+                    });
+
+                    const response = {
+                        question: sanitizedQuestion,
+                        reponse: result.answer,
+                        found: result.found,
+                        cached: false
+                    };
+
+                    responseCache.set(cacheKey, {
+                        folder: folder_name,
+                        question: sanitizedQuestion,
+                        reponse: result.answer,
+                        found: result.found
+                    });
+
+                    return response;
+
+                } catch (error) {
+                    console.error(`\nError processing question "${sanitizedQuestion}": ${error.message}`);
+                    return {
+                        question: sanitizedQuestion,
+                        reponse: `ERREUR: ${error.message}`,
+                        found: false,
+                        cached: false
+                    };
+                }
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            results.push(...batchResults.filter(r => r !== null));
+            progressBar.update(Math.min(i + batch_size, questionsToProcess.length));
+        }
+
+        progressBar.stop();
+        
+        const processingTime = (Date.now() - startTime) / 1000;
+        const cacheHits = results.filter(r => r.cached).length;
+        const foundAnswers = results.filter(r => r.found).length;
+        
+        console.log(`\n✓ Processing completed in ${processingTime.toFixed(2)}s`);
+        console.log(`✓ Cache hits: ${cacheHits}/${results.length}`);
+        console.log(`✓ Found relevant answers: ${foundAnswers}/${results.length}`);
+
+        // Check if response is still writable
+        if (!res.headersSent) {
+            res.status(200).json({
+                folder: folder_name,
+                csv_path: csv_path,
+                results: results,
+                statistics: {
+                    total_questions: questionsToProcess.length,
+                    processed_questions: results.length,
+                    cache_hits: cacheHits,
+                    found_answers: foundAnswers,
+                    processing_time_seconds: processingTime,
+                    timestamp: new Date().toISOString()
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Error processing CSV:', error);
+        // Only send error response if headers not sent
+        if (!res.headersSent) {
+            res.status(error.statusCode || 500).json({ 
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+});
+
+// --- ERROR HANDLING MIDDLEWARE ---
+app.use((error, req, res, next) => {
+    if (error.code === 'TIMEOUT') {
+        return res.status(408).json({ error: 'Request timeout' });
+    }
+    
+    console.error('Unhandled error:', error);
+    res.status(500).json({ 
+        error: 'Internal server error',
+        timestamp: new Date().toISOString()
+    });
+});
+
+// --- GRACEFUL SHUTDOWN ---
 process.on('SIGTERM', () => {
-    console.log('\n🛑 Shutting down Q&A Worker...');
+    console.log('Received SIGTERM, shutting down gracefully...');
+    markdownCache.clear();
+    responseCache.clear();
     process.exit(0);
 });
 
-// Start the worker
-console.log('🏗️ Q&A Worker starting...');
-workerLoop().catch(error => {
-    console.error('Fatal error in worker:', error);
-    process.exit(1);
+process.on('SIGINT', () => {
+    console.log('Received SIGINT, shutting down gracefully...');
+    markdownCache.clear();
+    responseCache.clear();
+    process.exit(0);
 });
+
+// --- CLUSTER SUPPORT ---
+if (CONFIG.use_clustering && cluster.isMaster) {
+    const numCPUs = os.cpus().length;
+    console.log(`Master ${process.pid} is running`);
+    console.log(`Forking ${numCPUs} workers...`);
+
+    for (let i = 0; i < numCPUs; i++) {
+        cluster.fork();
+    }
+
+    cluster.on('exit', (worker, code, signal) => {
+        console.log(`Worker ${worker.process.pid} died`);
+        cluster.fork();
+    });
+} else {
+    // --- START THE SERVER ---
+    (async () => {
+        try {
+            await loadMarkdownCache();
+            app.listen(PORT, () => {
+                console.log(`🚀 High-Performance Q&A Server running on http://localhost:${PORT}`);
+                console.log(`📚 API documentation at http://localhost:${PORT}/api-docs`);
+                console.log(`💾 Cache: ${markdownCache.size()} folders loaded`);
+                console.log(`⚡ Concurrency: ${CONFIG.max_concurrent_requests} max requests`);
+                if (CONFIG.use_clustering) {
+                    console.log(`🖥️  Worker ${process.pid} started`);
+                }
+            });
+        } catch (error) {
+            console.error('Failed to start server:', error);
+            process.exit(1);
+        }
+    })();
+}
