@@ -11,57 +11,15 @@ const os = require('os');
 // --- CONFIGURATION ---
 const CONFIG = {
     network_share_path: "/Users/Shared/CrawledData",
-    model_context_tokens: 16384, // Increased for larger context
+    model_context_tokens: 16384,
     ollama_url: "http://localhost:11434",
     model_name: "llama3.1:8b",
     max_response_length: 500,
     max_concurrent_requests: 10,
-    cache_ttl: 3600000, // 1 hour cache TTL
     chunk_size: 4000,
-    chunk_overlap_ratio: 0.1, // 10% overlap for chunks
+    chunk_overlap_ratio: 0.1,
     use_clustering: false
 };
-
-// --- ENHANCED CACHE WITH TTL ---
-class TTLCache {
-    constructor(ttl = CONFIG.cache_ttl) {
-        this.cache = new Map();
-        this.ttl = ttl;
-    }
-
-    set(key, value) {
-        const expiry = Date.now() + this.ttl;
-        this.cache.set(key, { value, expiry });
-    }
-
-    get(key) {
-        const item = this.cache.get(key);
-        if (!item) return null;
-        
-        if (Date.now() > item.expiry) {
-            this.cache.delete(key);
-            return null;
-        }
-        
-        return item.value;
-    }
-
-    has(key) {
-        return this.get(key) !== null;
-    }
-
-    clear() {
-        this.cache.clear();
-    }
-
-    size() {
-        return this.cache.size;
-    }
-}
-
-// --- CACHES ---
-const markdownCache = new TTLCache();
-const responseCache = new TTLCache(1800000); // 30 min for responses
 
 // --- CONCURRENCY CONTROL ---
 class ConcurrencyController {
@@ -117,16 +75,16 @@ const PORT = process.env.PORT || 3000;
 const openApiSpec = {
     openapi: "3.0.3",
     info: {
-        title: "High-Performance Q&A API",
-        version: "7.0.0",
-        description: "An optimized API with intelligent caching, concurrency control, and enhanced performance."
+        title: "Simplified Q&A API",
+        version: "8.0.0",
+        description: "A simplified API without caching for improved reliability."
     },
-    servers: [{ url: `http://localhost:${PORT}` }],
+    servers: [{ url: `http://192.168.0.64:${PORT}` }],
     paths: {
         "/process-single-question": {
             post: {
-                summary: "Process a single question with caching",
-                description: "Submits one question and returns a precise answer using cached markdown content with response caching.",
+                summary: "Process a single question without caching",
+                description: "Submits one question and returns a precise answer by reading markdown content in real-time.",
                 requestBody: {
                     required: true,
                     content: {
@@ -135,8 +93,7 @@ const openApiSpec = {
                                 type: "object",
                                 properties: {
                                     folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
-                                    single_question: { type: "string", example: "Quelles sont les expositions actuelles ?" },
-                                    use_cache: { type: "boolean", default: true }
+                                    single_question: { type: "string", example: "Quelles sont les expositions actuelles ?" }
                                 },
                                 required: ["folder_name", "single_question"]
                             }
@@ -155,73 +112,7 @@ const openApiSpec = {
                                         question: { type: "string" },
                                         reponse: { type: "string" },
                                         found: { type: "boolean" },
-                                        cached: { type: "boolean" },
                                         timestamp: { type: "string" }
-                                    }
-                                }
-                            }
-                        }
-                    }, 
-                    "400": { description: "Bad Request" }, 
-                    "404": { description: "Not Found" }, 
-                    "500": { description: "Server Error" },
-                    "503": { description: "Service Unavailable" }
-                }
-            }
-        },
-        "/process-csv": {
-            post: {
-                summary: "Process a CSV file with batch optimization",
-                description: "Processes CSV questions in optimized batches with progress tracking.",
-                requestBody: {
-                    required: true,
-                    content: {
-                        "application/json": {
-                            schema: {
-                                type: "object",
-                                properties: {
-                                    folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
-                                    csv_path: { type: "string", example: "/Users/victor/Desktop/questions.csv" },
-                                    batch_size: { type: "number", default: 5 }
-                                },
-                                required: ["folder_name", "csv_path"]
-                            }
-                        }
-                    }
-                },
-                responses: { 
-                    "200": { 
-                        description: "Success",
-                        content: {
-                            "application/json": {
-                                schema: {
-                                    type: "object",
-                                    properties: {
-                                        folder: { type: "string" },
-                                        csv_path: { type: "string" },
-                                        results: {
-                                            type: "array",
-                                            items: {
-                                                type: "object",
-                                                properties: {
-                                                    question: { type: "string" },
-                                                    reponse: { type: "string" },
-                                                    found: { type: "boolean" },
-                                                    cached: { type: "boolean" }
-                                                }
-                                            }
-                                        },
-                                        statistics: {
-                                            type: "object",
-                                            properties: {
-                                                total_questions: { type: "number" },
-                                                processed_questions: { type: "number" },
-                                                cache_hits: { type: "number" },
-                                                found_answers: { type: "number" },
-                                                processing_time_seconds: { type: "number" },
-                                                timestamp: { type: "string" }
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -236,18 +127,9 @@ const openApiSpec = {
         "/health": {
             get: {
                 summary: "Health check endpoint",
-                description: "Returns server health status and cache statistics.",
+                description: "Returns server health status.",
                 responses: {
                     "200": { description: "Server is healthy" }
-                }
-            }
-        },
-        "/cache/clear": {
-            post: {
-                summary: "Clear all caches",
-                description: "Clears both markdown and response caches.",
-                responses: {
-                    "200": { description: "Caches cleared successfully" }
                 }
             }
         }
@@ -256,6 +138,7 @@ const openApiSpec = {
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.get('/', (req, res) => res.redirect('/api-docs'));
+
 function chunkText(text, maxChars = CONFIG.chunk_size, overlapRatio = CONFIG.chunk_overlap_ratio) {
     try {
         if (!text || typeof text !== 'string' || text.length <= maxChars) {
@@ -278,7 +161,7 @@ function chunkText(text, maxChars = CONFIG.chunk_size, overlapRatio = CONFIG.chu
                 const breakPoint = Math.max(lastPeriod, lastNewline);
 
                 if (breakPoint > start && breakPoint <= end) {
-                    end = breakPoint + 1; // Adjust to break at period or newline
+                    end = breakPoint + 1;
                 } else {
                     console.warn(`No valid breakpoint found between ${start} and ${end}; using maxChars`);
                 }
@@ -317,10 +200,6 @@ function scoreChunk(chunk, question) {
 
 function sanitizeInput(input) {
     return input.trim().replace(/[^\w\s\-_.àâäéèêëïîôöùûüÿç]/gi, '');
-}
-
-function createCacheKey(folder, question) {
-    return `${folder}:${Buffer.from(question).toString('base64')}`;
 }
 
 async function readMarkdownFiles(dir, question = '') {
@@ -374,43 +253,6 @@ async function readMarkdownFiles(dir, question = '') {
     return content;
 }
 
-async function loadMarkdownCache() {
-    console.log("Pre-loading markdown content into cache...");
-    
-    try {
-        const folders = await fs.readdir(CONFIG.network_share_path, { withFileTypes: true });
-        const cachePromises = folders
-            .filter(folder => folder.isDirectory())
-            .map(async (folder) => {
-                const folderPath = path.join(CONFIG.network_share_path, folder.name);
-                try {
-                    const content = await readMarkdownFiles(folderPath);
-                    if (content.trim()) {
-                        markdownCache.set(folder.name, content);
-                        console.log(`✓ Cached markdown content for folder: ${folder.name} (${Math.round(content.length/1024)}KB)`);
-                    }
-                } catch (error) {
-                    console.error(`✗ Failed to cache folder ${folder.name}: ${error.message}`);
-                }
-            });
-
-        await Promise.all(cachePromises);
-        console.log(`Markdown cache loading completed. ${markdownCache.size()} folders cached.`);
-    } catch (error) {
-        console.error(`Error loading markdown cache: ${error.message}`);
-    }
-}
-
-async function getCachedMarkdown(folder_name, question = '') {
-    if (!markdownCache.has(folder_name)) {
-        console.log(`Loading markdown content for folder: ${folder_name}`);
-        const folderPath = path.join(CONFIG.network_share_path, folder_name);
-        const content = await readMarkdownFiles(folderPath, question);
-        markdownCache.set(folder_name, content);
-        console.log(`✓ Cached markdown content for folder: ${folder_name}`);
-    }
-    return markdownCache.get(folder_name);
-}
 async function getAnswerFromOllama(question, context) {
     console.log(`Processing question: ${question}`);
     console.log(`Context size: ${context.length} characters`);
@@ -544,25 +386,16 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         timestamp: new Date().toISOString(),
-        cache: {
-            markdown: markdownCache.size(),
-            responses: responseCache.size()
-        },
         config: {
             max_concurrent: CONFIG.max_concurrent_requests,
-            model: CONFIG.model_name
+            model: CONFIG.model_name,
+            cache_disabled: true
         }
     });
 });
 
-app.post('/cache/clear', (req, res) => {
-    markdownCache.clear();
-    responseCache.clear();
-    res.json({ message: 'All caches cleared successfully' });
-});
-
 app.post('/process-single-question', async (req, res) => {
-    const { folder_name, single_question, use_cache = true } = req.body;
+    const { folder_name, single_question } = req.body;
     
     if (!folder_name || !single_question) {
         return res.status(400).json({ 
@@ -571,24 +404,15 @@ app.post('/process-single-question', async (req, res) => {
     }
 
     const sanitizedQuestion = sanitizeInput(single_question);
-    const cacheKey = createCacheKey(folder_name, sanitizedQuestion);
 
     console.log(`\n--- Single Question Request ---`);
     console.log(`Folder: ${folder_name}`);
     console.log(`Question: ${sanitizedQuestion}`);
 
     try {
-        if (use_cache && responseCache.has(cacheKey)) {
-            console.log('✓ Cache hit for response');
-            const cachedResponse = responseCache.get(cacheKey);
-            return res.status(200).json({
-                ...cachedResponse,
-                cached: true,
-                timestamp: new Date().toISOString()
-            });
-        }
-
-        const markdownContent = await getCachedMarkdown(folder_name, sanitizedQuestion);
+        // Read markdown files fresh each time
+        const folderPath = path.join(CONFIG.network_share_path, folder_name);
+        const markdownContent = await readMarkdownFiles(folderPath, sanitizedQuestion);
         
         if (!markdownContent || markdownContent.trim().length === 0) {
             return res.status(404).json({ 
@@ -605,13 +429,8 @@ app.post('/process-single-question', async (req, res) => {
             question: sanitizedQuestion,
             reponse: result.answer,
             found: result.found,
-            cached: false,
             timestamp: new Date().toISOString()
         };
-
-        if (use_cache) {
-            responseCache.set(cacheKey, response);
-        }
 
         res.status(200).json(response);
 
@@ -621,143 +440,6 @@ app.post('/process-single-question', async (req, res) => {
             error: error.message,
             timestamp: new Date().toISOString()
         });
-    }
-});
-
-app.post('/process-csv', async (req, res) => {
-    const { folder_name, csv_path, batch_size = 5 } = req.body;
-    
-    if (!folder_name || !csv_path) {
-        return res.status(400).json({ 
-            error: "Bad Request: 'folder_name' and 'csv_path' are required." 
-        });
-    }
-
-    console.log(`\n--- CSV Processing Request ---`);
-    console.log(`Folder: ${folder_name}`);
-    console.log(`CSV Path: ${csv_path}`);
-    console.log(`Batch Size: ${batch_size}`);
-
-    try {
-        const questionsToProcess = await parseCsvQuestions(csv_path);
-        const markdownContent = await getCachedMarkdown(folder_name, questionsToProcess.map(q => q.question).join(' '));
-        
-        if (!markdownContent || markdownContent.trim().length === 0) {
-            return res.status(404).json({ 
-                error: "No relevant content found for this folder." 
-            });
-        }
-
-        console.log(`Found ${questionsToProcess.length} questions to process`);
-
-        if (questionsToProcess.length === 0) {
-            return res.status(400).json({ 
-                error: "No valid questions found in CSV file." 
-            });
-        }
-
-        const progressBar = new cliProgress.SingleBar({
-            format: 'Processing |{bar}| {percentage}% | {value}/{total} | ETA: {eta}s',
-            hideCursor: true
-        }, cliProgress.Presets.shades_classic);
-
-        progressBar.start(questionsToProcess.length, 0);
-        
-        const results = [];
-        const startTime = Date.now();
-
-        for (let i = 0; i < questionsToProcess.length; i += batch_size) {
-            const batch = questionsToProcess.slice(i, i + batch_size);
-            
-            const batchPromises = batch.map(async (q) => {
-                if (!q.question || q.question.trim().length === 0) {
-                    return null;
-                }
-
-                const sanitizedQuestion = sanitizeInput(q.question);
-                const cacheKey = createCacheKey(folder_name, sanitizedQuestion);
-
-                try {
-                    if (responseCache.has(cacheKey)) {
-                        const cachedResponse = responseCache.get(cacheKey);
-                        return {
-                            question: sanitizedQuestion,
-                            reponse: cachedResponse.reponse,
-                            found: cachedResponse.found || false,
-                            cached: true
-                        };
-                    }
-
-                    const result = await concurrencyController.execute(async () => {
-                        return await getAnswerFromOllama(sanitizedQuestion, markdownContent);
-                    });
-
-                    const response = {
-                        question: sanitizedQuestion,
-                        reponse: result.answer,
-                        found: result.found,
-                        cached: false
-                    };
-
-                    responseCache.set(cacheKey, {
-                        folder: folder_name,
-                        question: sanitizedQuestion,
-                        reponse: result.answer,
-                        found: result.found
-                    });
-
-                    return response;
-
-                } catch (error) {
-                    console.error(`\nError processing question "${sanitizedQuestion}": ${error.message}`);
-                    return {
-                        question: sanitizedtrusizedQuestion,
-                        reponse: `ERREUR: ${error.message}`,
-                        found: false,
-                        cached: false
-                    };
-                }
-            });
-
-            const batchResults = await Promise.all(batchPromises);
-            results.push(...batchResults.filter(r => r !== null));
-            progressBar.update(Math.min(i + batch_size, questionsToProcess.length));
-        }
-
-        progressBar.stop();
-        
-        const processingTime = (Date.now() - startTime) / 1000;
-        const cacheHits = results.filter(r => r.cached).length;
-        const foundAnswers = results.filter(r => r.found).length;
-        
-        console.log(`\n✓ Processing completed in ${processingTime.toFixed(2)}s`);
-        console.log(`✓ Cache hits: ${cacheHits}/${results.length}`);
-        console.log(`✓ Found relevant answers: ${foundAnswers}/${results.length}`);
-
-        if (!res.headersSent) {
-            res.status(200).json({
-                folder: folder_name,
-                csv_path: csv_path,
-                results: results,
-                statistics: {
-                    total_questions: questionsToProcess.length,
-                    processed_questions: results.length,
-                    cache_hits: cacheHits,
-                    found_answers: foundAnswers,
-                    processing_time_seconds: processingTime,
-                    timestamp: new Date().toISOString()
-                }
-            });
-        }
-
-    } catch (error) {
-        console.error('Error processing CSV:', error);
-        if (!res.headersSent) {
-            res.status(error.statusCode || 500).json({ 
-                error: error.message,
-                timestamp: new Date().toISOString()
-            });
-        }
     }
 });
 
@@ -777,15 +459,11 @@ app.use((error, req, res, next) => {
 // --- GRACEFUL SHUTDOWN ---
 process.on('SIGTERM', () => {
     console.log('Received SIGTERM, shutting down gracefully...');
-    markdownCache.clear();
-    responseCache.clear();
     process.exit(0);
 });
 
 process.on('SIGINT', () => {
     console.log('Received SIGINT, shutting down gracefully...');
-    markdownCache.clear();
-    responseCache.clear();
     process.exit(0);
 });
 
@@ -804,21 +482,13 @@ if (CONFIG.use_clustering && cluster.isMaster) {
         cluster.fork();
     });
 } else {
-    (async () => {
-        try {
-            await loadMarkdownCache();
-            app.listen(PORT, () => {
-                console.log(`🚀 High-Performance Q&A Server running on http://localhost:${PORT}`);
-                console.log(`📚 API documentation at http://localhost:${PORT}/api-docs`);
-                console.log(`💾 Cache: ${markdownCache.size()} folders loaded`);
-                console.log(`⚡ Concurrency: ${CONFIG.max_concurrent_requests} max requests`);
-                if (CONFIG.use_clustering) {
-                    console.log(`🖥️  Worker ${process.pid} started`);
-                }
-            });
-        } catch (error) {
-            console.error('Failed to start server:', error);
-            process.exit(1);
+    app.listen(PORT, () => {
+        console.log(`🚀 Simplified Q&A Server running on http://localhost:${PORT}`);
+        console.log(`📚 API documentation at http://localhost:${PORT}/api-docs`);
+        console.log(`⚡ Concurrency: ${CONFIG.max_concurrent_requests} max requests`);
+        console.log(`💾 Cache: DISABLED for reliability`);
+        if (CONFIG.use_clustering) {
+            console.log(`🖥️  Worker ${process.pid} started`);
         }
-    })();
+    });
 }
