@@ -11,14 +11,15 @@ const os = require('os');
 // --- CONFIGURATION ---
 const CONFIG = {
     network_share_path: "/Users/Shared/CrawledData",
-    model_context_tokens: 8192,
+    model_context_tokens: 16384, // Increased for larger context
     ollama_url: "http://localhost:11434",
     model_name: "llama3.1:8b",
     max_response_length: 500,
-    max_concurrent_requests: 10, // Limit concurrent Ollama requests
+    max_concurrent_requests: 10,
     cache_ttl: 3600000, // 1 hour cache TTL
-    chunk_size: 4000, // Max chars per context chunk
-    use_clustering: false // Set to true for multi-core processing
+    chunk_size: 4000,
+    chunk_overlap_ratio: 0.1, // 10% overlap for chunks
+    use_clustering: false
 };
 
 // --- ENHANCED CACHE WITH TTL ---
@@ -104,17 +105,15 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Add compression middleware
 const compression = require('compression');
 app.use(compression());
 
-// Add request timeout
 const timeout = require('connect-timeout');
-app.use(timeout('300s')); // 5 minute timeout
+app.use(timeout('300s'));
 
 const PORT = process.env.PORT || 3000;
 
-// --- ENHANCED API DOCUMENTATION ---
+// --- OPENAPI SPEC ---
 const openApiSpec = {
     openapi: "3.0.3",
     info: {
@@ -137,7 +136,7 @@ const openApiSpec = {
                                 properties: {
                                     folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
                                     single_question: { type: "string", example: "Quelles sont les expositions actuelles ?" },
-                                    use_cache: { type: "boolean", default: true, description: "Whether to use response caching" }
+                                    use_cache: { type: "boolean", default: true }
                                 },
                                 required: ["folder_name", "single_question"]
                             }
@@ -155,7 +154,7 @@ const openApiSpec = {
                                         folder: { type: "string" },
                                         question: { type: "string" },
                                         reponse: { type: "string" },
-                                        found: { type: "boolean", description: "True if relevant answer found in documentation" },
+                                        found: { type: "boolean" },
                                         cached: { type: "boolean" },
                                         timestamp: { type: "string" }
                                     }
@@ -183,7 +182,7 @@ const openApiSpec = {
                                 properties: {
                                     folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
                                     csv_path: { type: "string", example: "/Users/victor/Desktop/questions.csv" },
-                                    batch_size: { type: "number", default: 5, description: "Number of questions to process simultaneously" }
+                                    batch_size: { type: "number", default: 5 }
                                 },
                                 required: ["folder_name", "csv_path"]
                             }
@@ -207,7 +206,7 @@ const openApiSpec = {
                                                 properties: {
                                                     question: { type: "string" },
                                                     reponse: { type: "string" },
-                                                    found: { type: "boolean", description: "True if relevant answer found in documentation" },
+                                                    found: { type: "boolean" },
                                                     cached: { type: "boolean" }
                                                 }
                                             }
@@ -257,33 +256,63 @@ const openApiSpec = {
 
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.get('/', (req, res) => res.redirect('/api-docs'));
+function chunkText(text, maxChars = CONFIG.chunk_size, overlapRatio = CONFIG.chunk_overlap_ratio) {
+    try {
+        if (!text || typeof text !== 'string' || text.length <= maxChars) {
+            console.log(`chunkText: Text length ${text ? text.length : 0}, returning ${text ? '[text]' : '[]'}`);
+            return text ? [text] : [];
+        }
 
-// --- UTILITY FUNCTIONS ---
-function chunkText(text, maxChars = CONFIG.chunk_size) {
-    if (text.length <= maxChars) return [text];
-    
-    const chunks = [];
-    let start = 0;
-    
-    while (start < text.length) {
-        let end = start + maxChars;
-        
-        if (end < text.length) {
-            // Try to break at a sentence or paragraph boundary
-            const lastPeriod = text.lastIndexOf('.', end);
-            const lastNewline = text.lastIndexOf('\n', end);
-            const breakPoint = Math.max(lastPeriod, lastNewline);
-            
-            if (breakPoint > start + maxChars * 0.5) {
-                end = breakPoint + 1;
+        const chunks = [];
+        let start = 0;
+        const overlap = Math.floor(maxChars * overlapRatio);
+        let iterationCount = 0;
+        const maxIterations = Math.ceil(text.length / (maxChars - overlap)) + 1;
+
+        while (start < text.length && iterationCount < maxIterations) {
+            let end = Math.min(start + maxChars, text.length);
+
+            if (end < text.length) {
+                const lastPeriod = text.lastIndexOf('.', end);
+                const lastNewline = text.lastIndexOf('\n', end);
+                const breakPoint = Math.max(lastPeriod, lastNewline);
+
+                if (breakPoint > start && breakPoint <= end) {
+                    end = breakPoint + 1; // Adjust to break at period or newline
+                } else {
+                    console.warn(`No valid breakpoint found between ${start} and ${end}; using maxChars`);
+                }
+            }
+
+            console.log(`Chunking: start=${start}, end=${end}, chunkLength=${end - start}`);
+            chunks.push(text.substring(start, end));
+
+            start = end - overlap;
+            if (start < 0) {
+                console.warn(`Negative start index detected (${start}); setting to 0`);
+                start = 0;
+            }
+
+            iterationCount++;
+            if (iterationCount >= maxIterations) {
+                console.warn(`Max iterations (${maxIterations}) reached; breaking loop`);
+                break;
             }
         }
-        
-        chunks.push(text.substring(start, end));
-        start = end;
+
+        console.log(`chunkText: Created ${chunks.length} chunks`);
+        return chunks;
+    } catch (error) {
+        console.error(`Error in chunkText: ${error.message}`, error.stack);
+        return [];
     }
-    
-    return chunks;
+}
+
+function scoreChunk(chunk, question) {
+    const questionWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const chunkLower = chunk.toLowerCase();
+    const matchCount = questionWords.filter(word => chunkLower.includes(word)).length;
+    return matchCount / (questionWords.length || 1);
 }
 
 function sanitizeInput(input) {
@@ -294,8 +323,7 @@ function createCacheKey(folder, question) {
     return `${folder}:${Buffer.from(question).toString('base64')}`;
 }
 
-// --- CORE LOGIC FUNCTIONS ---
-async function readMarkdownFiles(dir) {
+async function readMarkdownFiles(dir, question = '') {
     const resolvedDir = path.resolve(dir);
     
     try {
@@ -309,23 +337,28 @@ async function readMarkdownFiles(dir) {
     let content = '';
     const files = await fs.readdir(resolvedDir, { withFileTypes: true });
     
-    // Process files in parallel for better performance
+    const questionWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const baseKeywords = ['exposition', 'exhibition', 'musée', 'museum', 'art', 'collection', 'visite', 'horaire', 'tarif'];
+    const relevantKeywords = [...baseKeywords, ...questionWords];
+    console.log(`Keywords for filtering: ${relevantKeywords.join(', ')}`);
+
     const filePromises = files.map(async (file) => {
         const fullPath = path.join(resolvedDir, file.name);
         
         if (file.isDirectory()) {
-            return await readMarkdownFiles(fullPath);
+            return await readMarkdownFiles(fullPath, question);
         } else if (file.name.endsWith('.md')) {
             try {
                 const fileContent = await fs.readFile(fullPath, 'utf8');
-                // Enhanced relevance filtering
-                const relevantKeywords = ['exposition', 'exhibition', 'musée', 'museum', 'art', 'collection', 'visite', 'horaire', 'tarif'];
-                const hasRelevantContent = relevantKeywords.some(keyword => 
+                const hasRelevantContent = relevantKeywords.length === 0 || relevantKeywords.some(keyword => 
                     fileContent.toLowerCase().includes(keyword)
                 );
                 
-                if (hasRelevantContent) {
+                if (hasRelevantContent || relevantKeywords.length === 0) {
+                    console.log(`Including file: ${file.name}`);
                     return `\n\n--- Contenu du fichier: ${file.name} ---\n\n${fileContent}`;
+                } else {
+                    console.log(`Excluding file: ${file.name} (no keyword match)`);
                 }
             } catch (error) {
                 console.warn(`Warning: Could not read file ${fullPath}: ${error.message}`);
@@ -336,6 +369,7 @@ async function readMarkdownFiles(dir) {
 
     const results = await Promise.all(filePromises);
     content = results.join('');
+    console.log(`Total content length for ${resolvedDir}: ${content.length} characters`);
     
     return content;
 }
@@ -367,15 +401,115 @@ async function loadMarkdownCache() {
     }
 }
 
-async function getCachedMarkdown(folder_name) {
+async function getCachedMarkdown(folder_name, question = '') {
     if (!markdownCache.has(folder_name)) {
         console.log(`Loading markdown content for folder: ${folder_name}`);
         const folderPath = path.join(CONFIG.network_share_path, folder_name);
-        const content = await readMarkdownFiles(folderPath);
+        const content = await readMarkdownFiles(folderPath, question);
         markdownCache.set(folder_name, content);
         console.log(`✓ Cached markdown content for folder: ${folder_name}`);
     }
     return markdownCache.get(folder_name);
+}
+async function getAnswerFromOllama(question, context) {
+    console.log(`Processing question: ${question}`);
+    console.log(`Context size: ${context.length} characters`);
+
+    const today = new Date().toLocaleDateString('fr-FR', { 
+        day: 'numeric', 
+        month: 'long', 
+        year: 'numeric' 
+    });
+
+    const chunks = chunkText(context);
+    console.log(`Number of chunks: ${chunks.length}`);
+
+    if (chunks.length === 0) {
+        console.warn('No chunks available; returning default response');
+        return {
+            answer: "Information insuffisante dans le contexte fourni.",
+            found: false
+        };
+    }
+
+    const scoredChunks = chunks.map(chunk => ({
+        chunk,
+        score: scoreChunk(chunk, question)
+    })).sort((a, b) => b.score - a.score);
+
+    let bestAnswer = null;
+    let bestScore = 0;
+    let foundRelevantInfo = false;
+
+    for (const { chunk, score } of scoredChunks.slice(0, 5)) {
+        console.log(`Processing chunk with relevance score: ${score.toFixed(2)}`);
+        const prompt = `Tu es un assistant expert pour un musée. Utilise EXCLUSIVEMENT le CONTEXTE ci-dessous pour répondre à la QUESTION. Fournis une réponse claire, concise et précise en moins de ${CONFIG.max_response_length} caractères. Si les informations sont insuffisantes, indique "Information insuffisante dans le contexte fourni." La date d'aujourd'hui est le ${today}.\n\nCONTEXTE:\n${chunk}\n\nQUESTION:\n${question}\n\nRÉPONSE:`;
+
+        const payload = {
+            model: CONFIG.model_name,
+            prompt,
+            stream: false,
+            options: { 
+                num_ctx: CONFIG.model_context_tokens,
+                temperature: 0.3,
+                top_p: 0.9,
+                repeat_penalty: 1.1
+            }
+        };
+
+        try {
+            const response = await fetch(`${CONFIG.ollama_url}/api/generate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                timeout: 30000
+            });
+
+            if (!response.ok) {
+                throw new Error(`Ollama API Error: ${response.status}`);
+            }
+
+            const result = await response.json();
+            let answer = result.response ? result.response.trim() : "Information insuffisante dans le contexte fourni.";
+            console.log(`Model response: ${answer.substring(0, 100)}...`);
+
+            const isRelevantAnswer = !answer.includes("Information insuffisante") && answer.length > 20;
+            const relevanceScore = calculateRelevanceScore(answer, question);
+
+            if (relevanceScore > bestScore && isRelevantAnswer) {
+                bestAnswer = answer;
+                bestScore = relevanceScore;
+                foundRelevantInfo = true;
+            }
+        } catch (error) {
+            console.warn(`Chunk processing failed: ${error.message}`);
+            continue;
+        }
+    }
+
+    const finalAnswer = bestAnswer || "Information insuffisante dans le contexte fourni.";
+    console.log(`Final answer: ${finalAnswer.substring(0, 100)}...`);
+    return {
+        answer: finalAnswer,
+        found: foundRelevantInfo
+    };
+}
+
+function calculateRelevanceScore(answer, question) {
+    const answerLower = answer.toLowerCase();
+    const questionLower = question.toLowerCase();
+    
+    const questionWords = questionLower.split(/\s+/).filter(w => w.length > 3);
+    const matchCount = questionWords.filter(word => answerLower.includes(word)).length;
+    const keywordScore = matchCount / (questionWords.length || 1);
+
+    const idealLength = 200;
+    const lengthScore = Math.min(answer.length / idealLength, 1) * (answer.length < 20 ? 0.5 : 1);
+
+    const isGeneric = answer.includes("Information insuffisante") || answer.length < 20;
+    const specificityScore = isGeneric ? 0.5 : 1;
+
+    return (keywordScore * 0.6 + lengthScore * 0.2 + specificityScore * 0.2);
 }
 
 async function parseCsvQuestions(csvPath) {
@@ -397,7 +531,6 @@ async function parseCsvQuestions(csvPath) {
             relax_column_count: true 
         });
         
-        // Validate and filter questions
         return questions.filter(q => q.question && q.question.trim().length > 0);
     } catch (error) {
         const userError = new Error("Failed to parse CSV. Ensure 'question' header exists and CSV is properly formatted.");
@@ -406,95 +539,7 @@ async function parseCsvQuestions(csvPath) {
     }
 }
 
-async function getAnswerFromOllama(question, context) {
-    const today = new Date().toLocaleDateString('fr-FR', { 
-        day: 'numeric', 
-        month: 'long', 
-        year: 'numeric' 
-    });
-
-    // Optimize context by chunking if too large
-    const chunks = chunkText(context);
-    let bestAnswer = null;
-    let bestScore = 0;
-    let foundRelevantInfo = false;
-
-    for (const chunk of chunks.slice(0, 3)) { // Process max 3 chunks for speed
-        const prompt = `Tu es un assistant expert pour un musée. Ta seule source de connaissance est le CONTEXTE ci-dessous. Réponds à la QUESTION de manière claire, concise et précise, en moins de ${CONFIG.max_response_length} caractères. Utilise uniquement les informations du CONTEXTE. N'invente RIEN. La date d'aujourd'hui est le ${today}. Si la réponse ne se trouve pas dans le CONTEXTE, réponds exactement: "Je ne trouve pas d'information pertinente dans les documents fournis pour répondre à cette question."\n\nCONTEXTE:\n${chunk}\n\nQUESTION:\n${question}\n\nRÉPONSE COURTOISE ET PRÉCISE:`;
-
-        const payload = {
-            model: CONFIG.model_name,
-            prompt,
-            stream: false,
-            options: { 
-                num_ctx: CONFIG.model_context_tokens,
-                temperature: 0.1,
-                top_p: 0.9,
-                repeat_penalty: 1.1
-            }
-        };
-
-        try {
-            const response = await fetch(`${CONFIG.ollama_url}/api/generate`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload),
-                timeout: 30000 // 30 second timeout
-            });
-
-            if (!response.ok) {
-                const errorBody = await response.text();
-                throw new Error(`Ollama API Error: ${response.status} - ${errorBody}`);
-            }
-
-            const result = await response.json();
-            let answer = result.response ? result.response.trim() : "La réponse du modèle était vide.";
-
-            // Check if answer contains relevant information
-            const isRelevantAnswer = !answer.includes("Je ne trouve pas d'information pertinente") && 
-                                   !answer.includes("La réponse du modèle était vide") &&
-                                   answer.length > 10; // Minimum meaningful response length
-
-            // Score answer based on relevance
-            const score = calculateRelevanceScore(answer, question);
-            
-            if (score > bestScore && isRelevantAnswer) {
-                bestAnswer = answer;
-                bestScore = score;
-                foundRelevantInfo = true;
-            }
-        } catch (error) {
-            if (error.message.includes("allocate") || error.message.includes("context window")) {
-                throw new Error(`Ollama Memory Error: Reduce context size or restart Ollama.`);
-            }
-            console.warn(`Chunk processing failed: ${error.message}`);
-            continue;
-        }
-    }
-
-    const finalAnswer = bestAnswer || "Je ne trouve pas d'information pertinente dans les documents fournis pour répondre à cette question.";
-    
-    return {
-        answer: finalAnswer,
-        found: foundRelevantInfo
-    };
-}
-
-function calculateRelevanceScore(answer, question) {
-    const answerLower = answer.toLowerCase();
-    const questionLower = question.toLowerCase();
-    
-    // Basic keyword matching
-    const questionWords = questionLower.split(/\s+/).filter(w => w.length > 3);
-    const matchCount = questionWords.filter(word => answerLower.includes(word)).length;
-    
-    // Length penalty for too short answers
-    const lengthScore = Math.min(answer.length / 50, 1);
-    
-    return (matchCount / questionWords.length) * lengthScore;
-}
-
-// --- ENHANCED ENDPOINTS ---
+// --- ENDPOINTS ---
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
@@ -533,7 +578,6 @@ app.post('/process-single-question', async (req, res) => {
     console.log(`Question: ${sanitizedQuestion}`);
 
     try {
-        // Check response cache first
         if (use_cache && responseCache.has(cacheKey)) {
             console.log('✓ Cache hit for response');
             const cachedResponse = responseCache.get(cacheKey);
@@ -544,7 +588,7 @@ app.post('/process-single-question', async (req, res) => {
             });
         }
 
-        const markdownContent = await getCachedMarkdown(folder_name);
+        const markdownContent = await getCachedMarkdown(folder_name, sanitizedQuestion);
         
         if (!markdownContent || markdownContent.trim().length === 0) {
             return res.status(404).json({ 
@@ -565,7 +609,6 @@ app.post('/process-single-question', async (req, res) => {
             timestamp: new Date().toISOString()
         };
 
-        // Cache the response
         if (use_cache) {
             responseCache.set(cacheKey, response);
         }
@@ -596,7 +639,8 @@ app.post('/process-csv', async (req, res) => {
     console.log(`Batch Size: ${batch_size}`);
 
     try {
-        const markdownContent = await getCachedMarkdown(folder_name);
+        const questionsToProcess = await parseCsvQuestions(csv_path);
+        const markdownContent = await getCachedMarkdown(folder_name, questionsToProcess.map(q => q.question).join(' '));
         
         if (!markdownContent || markdownContent.trim().length === 0) {
             return res.status(404).json({ 
@@ -604,7 +648,6 @@ app.post('/process-csv', async (req, res) => {
             });
         }
 
-        const questionsToProcess = await parseCsvQuestions(csv_path);
         console.log(`Found ${questionsToProcess.length} questions to process`);
 
         if (questionsToProcess.length === 0) {
@@ -668,7 +711,7 @@ app.post('/process-csv', async (req, res) => {
                 } catch (error) {
                     console.error(`\nError processing question "${sanitizedQuestion}": ${error.message}`);
                     return {
-                        question: sanitizedQuestion,
+                        question: sanitizedtrusizedQuestion,
                         reponse: `ERREUR: ${error.message}`,
                         found: false,
                         cached: false
@@ -691,7 +734,6 @@ app.post('/process-csv', async (req, res) => {
         console.log(`✓ Cache hits: ${cacheHits}/${results.length}`);
         console.log(`✓ Found relevant answers: ${foundAnswers}/${results.length}`);
 
-        // Check if response is still writable
         if (!res.headersSent) {
             res.status(200).json({
                 folder: folder_name,
@@ -710,7 +752,6 @@ app.post('/process-csv', async (req, res) => {
 
     } catch (error) {
         console.error('Error processing CSV:', error);
-        // Only send error response if headers not sent
         if (!res.headersSent) {
             res.status(error.statusCode || 500).json({ 
                 error: error.message,
@@ -763,7 +804,6 @@ if (CONFIG.use_clustering && cluster.isMaster) {
         cluster.fork();
     });
 } else {
-    // --- START THE SERVER ---
     (async () => {
         try {
             await loadMarkdownCache();
