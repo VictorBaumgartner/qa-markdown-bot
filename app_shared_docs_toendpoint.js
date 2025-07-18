@@ -1,10 +1,10 @@
 const fs = require('fs').promises;
 const path = require('path');
-const { parse } = require('csv-parse/sync');
 const express = require('express');
 const fetch = require('node-fetch').default;
 const swaggerUi = require('swagger-ui-express');
-const cliProgress = require('cli-progress');
+const compression = require('compression');
+const timeout = require('connect-timeout');
 const cluster = require('cluster');
 const os = require('os');
 
@@ -16,7 +16,7 @@ const CONFIG = {
     model_name: "llama3.1:8b",
     max_response_length: 500,
     max_concurrent_requests: 10,
-    chunk_size: 4000,
+    chunk_size: 8000, // Increased from 4000 to reduce number of chunks
     chunk_overlap_ratio: 0.1,
     use_clustering: false
 };
@@ -32,25 +32,31 @@ class ConcurrencyController {
     async execute(asyncFn) {
         return new Promise((resolve, reject) => {
             this.queue.push({ fn: asyncFn, resolve, reject });
+            console.log(`ConcurrencyController: Queued task, queue length: ${this.queue.length}, running: ${this.running}`);
             this.processQueue();
         });
     }
 
     async processQueue() {
         if (this.running >= this.maxConcurrent || this.queue.length === 0) {
+            console.log(`ConcurrencyController: Skipping processQueue, running: ${this.running}, queue: ${this.queue.length}`);
             return;
         }
 
         this.running++;
         const { fn, resolve, reject } = this.queue.shift();
+        console.log(`ConcurrencyController: Processing task, running: ${this.running}, queue: ${this.queue.length}`);
 
         try {
             const result = await fn();
+            console.log(`ConcurrencyController: Task completed successfully`);
             resolve(result);
         } catch (error) {
+            console.error(`ConcurrencyController: Task failed: ${error.message}`, error.stack);
             reject(error);
         } finally {
             this.running--;
+            console.log(`ConcurrencyController: Task finished, running: ${this.running}, queue: ${this.queue.length}`);
             this.processQueue();
         }
     }
@@ -62,12 +68,8 @@ const concurrencyController = new ConcurrencyController();
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-const compression = require('compression');
-app.use(compression());
-
-const timeout = require('connect-timeout');
-app.use(timeout('300s'));
+app.use(compression({ level: 6 }));
+app.use(timeout('900s', { respond: false })); // Prevent automatic timeout response
 
 const PORT = process.env.PORT || 3000;
 
@@ -100,8 +102,8 @@ const openApiSpec = {
                         }
                     }
                 },
-                responses: { 
-                    "200": { 
+                responses: {
+                    "200": {
                         description: "Success",
                         content: {
                             "application/json": {
@@ -117,9 +119,9 @@ const openApiSpec = {
                                 }
                             }
                         }
-                    }, 
-                    "400": { description: "Bad Request" }, 
-                    "404": { description: "Not Found" }, 
+                    },
+                    "400": { description: "Bad Request" },
+                    "404": { description: "Not Found" },
                     "500": { description: "Server Error" }
                 }
             }
@@ -127,7 +129,7 @@ const openApiSpec = {
         "/process-multiple-questions": {
             post: {
                 summary: "Process multiple questions without caching",
-                description: "Submits multiple questions (up to 20) and returns precise answers by reading markdown content in real-time.",
+                description: "Submits multiple questions (up to 5) and returns precise answers by reading markdown content in real-time.",
                 requestBody: {
                     required: true,
                     content: {
@@ -136,10 +138,10 @@ const openApiSpec = {
                                 type: "object",
                                 properties: {
                                     folder_name: { type: "string", example: "crawl_zadkine_paris_fr_1752142903921" },
-                                    questions: { 
-                                        type: "array", 
+                                    questions: {
+                                        type: "array",
                                         items: { type: "string" },
-                                        maxItems: 20,
+                                        maxItems: 5,
                                         example: ["Quelles sont les expositions actuelles ?", "Quels sont les horaires d'ouverture ?", "Quel est le tarif d'entrée ?"]
                                     }
                                 },
@@ -148,8 +150,8 @@ const openApiSpec = {
                         }
                     }
                 },
-                responses: { 
-                    "200": { 
+                responses: {
+                    "200": {
                         description: "Success",
                         content: {
                             "application/json": {
@@ -177,9 +179,9 @@ const openApiSpec = {
                                 }
                             }
                         }
-                    }, 
-                    "400": { description: "Bad Request" }, 
-                    "404": { description: "Not Found" }, 
+                    },
+                    "400": { description: "Bad Request" },
+                    "404": { description: "Not Found" },
                     "500": { description: "Server Error" }
                 }
             }
@@ -199,6 +201,20 @@ const openApiSpec = {
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(openApiSpec));
 app.get('/', (req, res) => res.redirect('/api-docs'));
 
+// --- TIMEOUT HANDLER ---
+app.use((req, res, next) => {
+    if (req.timedout && !res.headersSent) {
+        console.error('Request timed out after 900s');
+        res.status(408).json({
+            error: 'Request timeout after 900 seconds',
+            timestamp: new Date().toISOString()
+        });
+        return;
+    }
+    next();
+});
+
+// --- UTILITY FUNCTIONS ---
 function chunkText(text, maxChars = CONFIG.chunk_size, overlapRatio = CONFIG.chunk_overlap_ratio) {
     try {
         if (!text || typeof text !== 'string' || text.length <= maxChars) {
@@ -254,8 +270,23 @@ function chunkText(text, maxChars = CONFIG.chunk_size, overlapRatio = CONFIG.chu
 function scoreChunk(chunk, question) {
     const questionWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3);
     const chunkLower = chunk.toLowerCase();
-    const matchCount = questionWords.filter(word => chunkLower.includes(word)).length;
-    return matchCount / (questionWords.length || 1);
+    let score = 0;
+
+    const keywordWeights = {
+        'horaire': 2,
+        'tarif': 2,
+        'exposition': 2,
+        'accessibilité': 2,
+        'musée': 1.5
+    };
+
+    questionWords.forEach(word => {
+        if (chunkLower.includes(word)) {
+            score += keywordWeights[word] || 1;
+        }
+    });
+
+    return score / (questionWords.length || 1);
 }
 
 function sanitizeInput(input) {
@@ -278,7 +309,7 @@ async function readMarkdownFiles(dir, question = '') {
     
     const questionWords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3);
     const baseKeywords = ['exposition', 'exhibition', 'musée', 'museum', 'art', 'collection', 'visite', 'horaire', 'tarif'];
-    const relevantKeywords = [...baseKeywords, ...questionWords];
+    const relevantKeywords = [...new Set([...baseKeywords, ...questionWords])];
     console.log(`Keywords for filtering: ${relevantKeywords.join(', ')}`);
 
     const filePromises = files.map(async (file) => {
@@ -289,15 +320,15 @@ async function readMarkdownFiles(dir, question = '') {
         } else if (file.name.endsWith('.md')) {
             try {
                 const fileContent = await fs.readFile(fullPath, 'utf8');
-                const hasRelevantContent = relevantKeywords.length === 0 || relevantKeywords.some(keyword => 
-                    fileContent.toLowerCase().includes(keyword)
-                );
-                
-                if (hasRelevantContent || relevantKeywords.length === 0) {
-                    console.log(`Including file: ${file.name}`);
+                const fileContentLower = fileContent.toLowerCase();
+                const keywordMatches = relevantKeywords.filter(keyword => fileContentLower.includes(keyword)).length;
+                const relevanceScore = keywordMatches / (relevantKeywords.length || 1);
+
+                if (relevanceScore > 0.3) {
+                    console.log(`Including file: ${file.name} (relevance score: ${relevanceScore.toFixed(2)})`);
                     return `\n\n--- Contenu du fichier: ${file.name} ---\n\n${fileContent}`;
                 } else {
-                    console.log(`Excluding file: ${file.name} (no keyword match)`);
+                    console.log(`Excluding file: ${file.name} (relevance score: ${relevanceScore.toFixed(2)})`);
                 }
             } catch (error) {
                 console.warn(`Warning: Could not read file ${fullPath}: ${error.message}`);
@@ -317,10 +348,10 @@ async function getAnswerFromOllama(question, context) {
     console.log(`Processing question: ${question}`);
     console.log(`Context size: ${context.length} characters`);
 
-    const today = new Date().toLocaleDateString('fr-FR', { 
-        day: 'numeric', 
-        month: 'long', 
-        year: 'numeric' 
+    const today = new Date().toLocaleDateString('fr-FR', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
     });
 
     const chunks = chunkText(context);
@@ -343,7 +374,7 @@ async function getAnswerFromOllama(question, context) {
     let bestScore = 0;
     let foundRelevantInfo = false;
 
-    for (const { chunk, score } of scoredChunks.slice(0, 5)) {
+    for (const { chunk, score } of scoredChunks.slice(0, 2)) {
         console.log(`Processing chunk with relevance score: ${score.toFixed(2)}`);
         const prompt = `Tu es un assistant expert pour un musée. Utilise EXCLUSIVEMENT le CONTEXTE ci-dessous pour répondre à la QUESTION. Fournis une réponse claire, concise et précise en moins de ${CONFIG.max_response_length} caractères. Si les informations sont insuffisantes, indique "Information insuffisante dans le contexte fourni." La date d'aujourd'hui est le ${today}.\n\nCONTEXTE:\n${chunk}\n\nQUESTION:\n${question}\n\nRÉPONSE:`;
 
@@ -351,7 +382,7 @@ async function getAnswerFromOllama(question, context) {
             model: CONFIG.model_name,
             prompt,
             stream: false,
-            options: { 
+            options: {
                 num_ctx: CONFIG.model_context_tokens,
                 temperature: 0.3,
                 top_p: 0.9,
@@ -364,11 +395,11 @@ async function getAnswerFromOllama(question, context) {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
-                timeout: 30000
+                timeout: 60000
             });
 
             if (!response.ok) {
-                throw new Error(`Ollama API Error: ${response.status}`);
+                throw new Error(`Ollama API Error: ${response.status} ${response.statusText}`);
             }
 
             const result = await response.json();
@@ -414,73 +445,70 @@ function calculateRelevanceScore(answer, question) {
     return (keywordScore * 0.6 + lengthScore * 0.2 + specificityScore * 0.2);
 }
 
-async function parseCsvQuestions(csvPath) {
-    try {
-        await fs.access(csvPath);
-    } catch (error) {
-        const err = new Error(`CSV file not found: ${csvPath}`);
-        err.statusCode = 404;
-        throw err;
-    }
-
-    const csvContent = await fs.readFile(csvPath, 'utf8');
-    
-    try {
-        const questions = parse(csvContent, { 
-            columns: true, 
-            skip_empty_lines: true, 
-            trim: true,
-            relax_column_count: true 
-        });
-        
-        return questions.filter(q => q.question && q.question.trim().length > 0);
-    } catch (error) {
-        const userError = new Error("Failed to parse CSV. Ensure 'question' header exists and CSV is properly formatted.");
-        userError.statusCode = 400;
-        throw userError;
-    }
-}
-
 // --- ENDPOINTS ---
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        config: {
-            max_concurrent: CONFIG.max_concurrent_requests,
-            model: CONFIG.model_name,
-            cache_disabled: true
-        }
-    });
+    if (!res.headersSent) {
+        res.json({
+            status: 'healthy',
+            timestamp: new Date().toISOString(),
+            config: {
+                max_concurrent: CONFIG.max_concurrent_requests,
+                model: CONFIG.model_name,
+                cache_disabled: true
+            }
+        });
+    }
 });
 
 app.post('/process-multiple-questions', async (req, res) => {
-    const { folder_name, questions } = req.body;
-    
-    if (!folder_name || !questions || !Array.isArray(questions)) {
-        return res.status(400).json({ 
-            error: "Bad Request: 'folder_name' and 'questions' array are required." 
-        });
+    let responseSent = false;
+
+    if (!req.body.folder_name || !req.body.questions || !Array.isArray(req.body.questions)) {
+        if (!res.headersSent) {
+            responseSent = true;
+            return res.status(400).json({
+                error: "Bad Request: 'folder_name' and 'questions' array are required.",
+                timestamp: new Date().toISOString()
+            });
+        }
+        return;
     }
+
+    const { folder_name, questions } = req.body;
 
     if (questions.length === 0) {
-        return res.status(400).json({ 
-            error: "Bad Request: 'questions' array cannot be empty." 
-        });
+        if (!res.headersSent) {
+            responseSent = true;
+            return res.status(400).json({
+                error: "Bad Request: 'questions' array cannot be empty.",
+                timestamp: new Date().toISOString()
+            });
+        }
+        return;
     }
 
-    if (questions.length > 20) {
-        return res.status(400).json({ 
-            error: "Bad Request: Maximum 20 questions allowed per request." 
-        });
+    if (questions.length > 5) {
+        if (!res.headersSent) {
+            responseSent = true;
+            return res.status(400).json({
+                error: "Bad Request: Maximum 5 questions allowed per request to avoid timeout.",
+                timestamp: new Date().toISOString()
+            });
+        }
+        return;
     }
 
     const sanitizedQuestions = questions.map(q => sanitizeInput(q)).filter(q => q.length > 0);
 
     if (sanitizedQuestions.length === 0) {
-        return res.status(400).json({ 
-            error: "Bad Request: No valid questions after sanitization." 
-        });
+        if (!res.headersSent) {
+            responseSent = true;
+            return res.status(400).json({
+                error: "Bad Request: No valid questions after sanitization.",
+                timestamp: new Date().toISOString()
+            });
+        }
+        return;
     }
 
     console.log(`\n--- Multiple Questions Request ---`);
@@ -491,23 +519,25 @@ app.post('/process-multiple-questions', async (req, res) => {
     const results = [];
 
     try {
-        // Read markdown files once for all questions
         const folderPath = path.join(CONFIG.network_share_path, folder_name);
         console.log(`Reading markdown content from: ${folderPath}`);
         const markdownContent = await readMarkdownFiles(folderPath);
-        
+
         if (!markdownContent || markdownContent.trim().length === 0) {
-            return res.status(404).json({ 
-                error: "No relevant content found for this folder." 
-            });
+            if (!res.headersSent) {
+                responseSent = true;
+                return res.status(404).json({
+                    error: "No relevant content found for this folder.",
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
         }
 
         console.log(`Processing ${sanitizedQuestions.length} questions...`);
 
-        // Process questions with concurrency control
         const processPromises = sanitizedQuestions.map(async (question, index) => {
             const questionStartTime = Date.now();
-            
             try {
                 const result = await concurrencyController.execute(async () => {
                     return await getAnswerFromOllama(question, markdownContent);
@@ -523,9 +553,9 @@ app.post('/process-multiple-questions', async (req, res) => {
                     processing_time_ms: processingTime
                 };
             } catch (error) {
-                console.error(`Error processing question ${index + 1}: ${error.message}`);
+                console.error(`Error processing question ${index + 1}: ${error.message}`, error.stack);
                 const processingTime = Date.now() - questionStartTime;
-                
+
                 return {
                     question: question,
                     reponse: `Erreur lors du traitement: ${error.message}`,
@@ -535,48 +565,60 @@ app.post('/process-multiple-questions', async (req, res) => {
             }
         });
 
-        // Wait for all questions to be processed
         const processedResults = await Promise.all(processPromises);
         results.push(...processedResults);
 
         const totalProcessingTime = Date.now() - startTime;
 
-        const response = {
-            folder: folder_name,
-            total_questions: questions.length,
-            processed_questions: results.length,
-            results: results,
-            timestamp: new Date().toISOString(),
-            total_processing_time_ms: totalProcessingTime
-        };
+        if (!res.headersSent && !responseSent) {
+            responseSent = true;
+            const response = {
+                folder: folder_name,
+                total_questions: sanitizedQuestions.length,
+                processed_questions: results.length,
+                results: results,
+                timestamp: new Date().toISOString(),
+                total_processing_time_ms: totalProcessingTime
+            };
 
-        console.log(`All questions processed in ${totalProcessingTime}ms`);
-        res.status(200).json(response);
+            console.log(`All questions processed in ${totalProcessingTime}ms`);
+            console.log(`Response size: ${Buffer.byteLength(JSON.stringify(response), 'utf8')} bytes`);
+            res.status(200).json(response);
+        }
 
     } catch (error) {
-        console.error('Error processing multiple questions:', error);
+        console.error('Error processing multiple questions:', error.message, error.stack);
         const totalProcessingTime = Date.now() - startTime;
-        
-        res.status(error.statusCode || 500).json({ 
-            error: error.message,
-            folder: folder_name,
-            processed_questions: results.length,
-            results: results,
-            timestamp: new Date().toISOString(),
-            total_processing_time_ms: totalProcessingTime
-        });
+
+        if (!res.headersSent && !responseSent) {
+            responseSent = true;
+            res.status(error.statusCode || 500).json({
+                error: error.message || 'Internal server error',
+                folder: folder_name,
+                processed_questions: results.length,
+                results: results,
+                timestamp: new Date().toISOString(),
+                total_processing_time_ms: totalProcessingTime
+            });
+        }
     }
 });
 
 app.post('/process-single-question', async (req, res) => {
-    const { folder_name, single_question } = req.body;
-    
-    if (!folder_name || !single_question) {
-        return res.status(400).json({ 
-            error: "Bad Request: 'folder_name' and 'single_question' are required." 
-        });
+    let responseSent = false;
+
+    if (!req.body.folder_name || !req.body.single_question) {
+        if (!res.headersSent) {
+            responseSent = true;
+            return res.status(400).json({
+                error: "Bad Request: 'folder_name' and 'single_question' are required.",
+                timestamp: new Date().toISOString()
+            });
+        }
+        return;
     }
 
+    const { folder_name, single_question } = req.body;
     const sanitizedQuestion = sanitizeInput(single_question);
 
     console.log(`\n--- Single Question Request ---`);
@@ -584,48 +626,78 @@ app.post('/process-single-question', async (req, res) => {
     console.log(`Question: ${sanitizedQuestion}`);
 
     try {
-        // Read markdown files fresh each time
         const folderPath = path.join(CONFIG.network_share_path, folder_name);
         const markdownContent = await readMarkdownFiles(folderPath, sanitizedQuestion);
-        
+
         if (!markdownContent || markdownContent.trim().length === 0) {
-            return res.status(404).json({ 
-                error: "No relevant content found for this folder." 
-            });
+            if (!res.headersSent) {
+                responseSent = true;
+                return res.status(404).json({
+                    error: "No relevant content found for this folder.",
+                    timestamp: new Date().toISOString()
+                });
+            }
+            return;
         }
 
         const result = await concurrencyController.execute(async () => {
             return await getAnswerFromOllama(sanitizedQuestion, markdownContent);
         });
 
-        const response = {
-            folder: folder_name,
-            question: sanitizedQuestion,
-            reponse: result.answer,
-            found: result.found,
-            timestamp: new Date().toISOString()
-        };
+        if (!res.headersSent && !responseSent) {
+            responseSent = true;
+            const response = {
+                folder: folder_name,
+                question: sanitizedQuestion,
+                reponse: result.answer,
+                found: result.found,
+                timestamp: new Date().toISOString()
+            };
 
-        res.status(200).json(response);
+            res.status(200).json(response);
+        }
 
     } catch (error) {
         console.error('Error processing single question:', error);
-        res.status(error.statusCode || 500).json({ 
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
+        if (!res.headersSent && !responseSent) {
+            responseSent = true;
+            res.status(error.statusCode || 500).json({
+                error: error.message || 'Internal server error',
+                timestamp: new Date().toISOString()
+            });
+        }
     }
 });
 
 // --- ERROR HANDLING MIDDLEWARE ---
 app.use((error, req, res, next) => {
-    if (error.code === 'TIMEOUT') {
-        return res.status(408).json({ error: 'Request timeout' });
+    if (res.headersSent) {
+        console.error('Error handler skipped: Headers already sent', error);
+        return;
     }
-    
+
+    if (error.type === 'entity.parse.failed') {
+        console.error('JSON Parsing Error:', error.message, error.body);
+        return res.status(400).json({
+            error: 'Invalid JSON in request body. Check for trailing commas or incorrect syntax.',
+            details: error.message,
+            body: error.body,
+            timestamp: new Date().toISOString()
+        });
+    }
+
+    if (error.code === 'TIMEOUT') {
+        console.error('Request timeout:', error);
+        return res.status(408).json({
+            error: 'Request timeout after 900 seconds',
+            timestamp: new Date().toISOString()
+        });
+    }
+
     console.error('Unhandled error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
         error: 'Internal server error',
+        details: error.message,
         timestamp: new Date().toISOString()
     });
 });
@@ -661,9 +733,9 @@ if (CONFIG.use_clustering && cluster.isMaster) {
         console.log(`📚 API documentation at http://localhost:${PORT}/api-docs`);
         console.log(`⚡ Concurrency: ${CONFIG.max_concurrent_requests} max requests`);
         console.log(`💾 Cache: DISABLED for reliability`);
-        console.log(`📝 Endpoints: /process-single-question, /process-multiple-questions (max 20)`);
+        console.log(`📝 Endpoints: /process-single-question, /process-multiple-questions (max 5)`);
         if (CONFIG.use_clustering) {
-            console.log(`🖥️  Worker ${process.pid} started`);
+            console.log(`🖥️ Worker ${process.pid} started`);
         }
     });
 }
